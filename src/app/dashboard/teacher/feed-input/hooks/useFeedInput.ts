@@ -13,6 +13,7 @@ import {
   AbsenceReason,
   CardStatus,
   SaveFeedPayload,
+  MemoField,
 } from '../types';
 import {
   getTeacherClasses,
@@ -67,8 +68,64 @@ export function useFeedInput() {
   const [makeupResults, setMakeupResults] = useState<ClassStudent[]>([]);
   const [isSearchingMakeup, setIsSearchingMakeup] = useState(false);
   
+  // 메모 필드 (특이사항 고정 + 추가 가능)
+  const [memoFields, setMemoFields] = useState<MemoField[]>([
+    { id: 'default', name: '특이사항', isFixed: true }
+  ]);
+  
   // Dirty 체크 (페이지 이탈 방지)
   const hasDirtyCards = Object.values(cardDataMap).some(c => c.isDirty);
+  
+  // ============================================================================
+  // 메모 필드 관리
+  // ============================================================================
+  
+  const addMemoField = useCallback((name: string) => {
+    const newField: MemoField = {
+      id: `memo_${Date.now()}`,
+      name,
+      isFixed: false,
+    };
+    setMemoFields(prev => [...prev, newField]);
+    
+    // 모든 카드에 새 메모 필드 추가
+    setCardDataMap(prev => {
+      const updated = { ...prev };
+      Object.keys(updated).forEach(studentId => {
+        updated[studentId] = {
+          ...updated[studentId],
+          memoValues: {
+            ...updated[studentId].memoValues,
+            [newField.id]: '',
+          },
+        };
+      });
+      return updated;
+    });
+  }, []);
+  
+  const removeMemoField = useCallback((fieldId: string) => {
+    setMemoFields(prev => prev.filter(f => f.id !== fieldId));
+    
+    // 모든 카드에서 해당 메모 필드 제거
+    setCardDataMap(prev => {
+      const updated = { ...prev };
+      Object.keys(updated).forEach(studentId => {
+        const { [fieldId]: removed, ...rest } = updated[studentId].memoValues;
+        updated[studentId] = {
+          ...updated[studentId],
+          memoValues: rest,
+        };
+      });
+      return updated;
+    });
+  }, []);
+  
+  const renameMemoField = useCallback((fieldId: string, newName: string) => {
+    setMemoFields(prev => 
+      prev.map(f => f.id === fieldId ? { ...f, name: newName } : f)
+    );
+  }, []);
   
   // ============================================================================
   // 초기 데이터 로드
@@ -188,6 +245,11 @@ export function useFeedInput() {
       feedValues[set.id] = savedValue?.optionId || null;
     });
     
+    // 메모 값 초기화 (기본: 특이사항)
+    const memoValues: Record<string, string> = {
+      'default': saved?.memo || '',
+    };
+    
     const hasSaved = !!saved;
     const status: CardStatus = hasSaved ? 'saved' : 'empty';
     
@@ -202,7 +264,7 @@ export function useFeedInput() {
       progressText: saved?.progressText,
       previousProgress,
       feedValues,
-      memos: saved?.memo ? [saved.memo] : [''],
+      memoValues,
       materials: saved?.materials || [],
       status,
       isDirty: false,
@@ -227,23 +289,18 @@ export function useFeedInput() {
       return 'dirty';
     }
     
-    // 출석인 경우: 필수 항목 체크
+    // 출석인 경우: 모든 피드 항목 필수 체크 (메모 제외)
     for (const set of optionSets) {
-      if (set.is_required && !data.feedValues[set.id]) {
-        return 'error';
+      if (!data.feedValues[set.id]) {
+        return 'error';  // 하나라도 비어있으면 에러
       }
     }
     
     // 이미 저장되어 있고 변경 없으면 saved
     if (!data.isDirty && data.savedData) return 'saved';
     
-    // 뭐라도 입력했으면 dirty
-    const hasAnyValue = Object.values(data.feedValues).some(v => v);
-    if (hasAnyValue || data.progressText || data.memos[0]) {
-      return 'dirty';
-    }
-    
-    return 'empty';
+    // 모든 항목 입력됨 → dirty (저장 대기)
+    return 'dirty';
   }
   
   // ============================================================================
@@ -290,10 +347,25 @@ export function useFeedInput() {
     updateCardData(studentId, { progressText: progress });
   }, [updateCardData]);
   
-  // 메모 변경
-  const handleMemoChange = useCallback((studentId: string, memo: string) => {
-    updateCardData(studentId, { memos: [memo] });
-  }, [updateCardData]);
+  // 메모 변경 (필드별)
+  const handleMemoChange = useCallback((studentId: string, fieldId: string, value: string) => {
+    setCardDataMap(prev => {
+      const current = prev[studentId];
+      if (!current) return prev;
+      
+      const updated = {
+        ...current,
+        memoValues: {
+          ...current.memoValues,
+          [fieldId]: value,
+        },
+        isDirty: true,
+      };
+      updated.status = calculateCardStatus(updated);
+      
+      return { ...prev, [studentId]: updated };
+    });
+  }, [optionSets]);
   
   // 피드 값 변경 (바텀시트에서 선택)
   const handleFeedValueChange = useCallback((
@@ -364,6 +436,15 @@ export function useFeedInput() {
     setSavingStudentId(studentId);
     
     try {
+      // 메모 값들을 하나의 문자열로 합침 (구분자 사용)
+      const memoText = Object.entries(cardData.memoValues)
+        .filter(([_, value]) => value.trim())
+        .map(([fieldId, value]) => {
+          const field = memoFields.find(f => f.id === fieldId);
+          return `[${field?.name || fieldId}] ${value}`;
+        })
+        .join('\n');
+      
       const payload: SaveFeedPayload = {
         studentId,
         classId: selectedClassId,
@@ -374,7 +455,7 @@ export function useFeedInput() {
         notifyParent: cardData.notifyParent,
         isMakeup: cardData.isMakeup,
         progressText: cardData.attendanceStatus === 'present' ? cardData.progressText : undefined,
-        memo: cardData.memos[0] || undefined,
+        memo: memoText || undefined,
         feedValues: cardData.attendanceStatus === 'present'
           ? Object.entries(cardData.feedValues)
               .filter(([_, optionId]) => optionId)
@@ -407,7 +488,7 @@ export function useFeedInput() {
               notifyParent: cardData.notifyParent,
               isMakeup: cardData.isMakeup,
               progressText: cardData.progressText,
-              memo: cardData.memos[0],
+              memo: cardData.memoValues['default'] || '',
               feedValues: Object.entries(cardData.feedValues)
                 .filter(([_, optionId]) => optionId)
                 .map(([setId, optionId]) => ({ setId, optionId: optionId! })),
@@ -443,28 +524,39 @@ export function useFeedInput() {
     setIsSaving(true);
     
     try {
-      const payloads: SaveFeedPayload[] = dirtyCards.map(cardData => ({
-        studentId: cardData.studentId,
-        classId: selectedClassId,
-        feedDate: selectedDate,
-        attendanceStatus: cardData.attendanceStatus,
-        absenceReason: cardData.absenceReason,
-        absenceReasonDetail: cardData.absenceReasonDetail,
-        notifyParent: cardData.notifyParent,
-        isMakeup: cardData.isMakeup,
-        progressText: cardData.attendanceStatus === 'present' ? cardData.progressText : undefined,
-        memo: cardData.memos[0] || undefined,
-        feedValues: cardData.attendanceStatus === 'present'
-          ? Object.entries(cardData.feedValues)
-              .filter(([_, optionId]) => optionId)
-              .map(([setId, optionId]) => ({ setId, optionId: optionId! }))
-          : [],
-        materials: cardData.materials.map(m => ({
-          materialName: m.materialName,
-          quantity: m.quantity,
-        })),
-        idempotencyKey: generateIdempotencyKey(),
-      }));
+      const payloads: SaveFeedPayload[] = dirtyCards.map(cardData => {
+        // 메모 값들을 하나의 문자열로 합침
+        const memoText = Object.entries(cardData.memoValues)
+          .filter(([_, value]) => value.trim())
+          .map(([fieldId, value]) => {
+            const field = memoFields.find(f => f.id === fieldId);
+            return `[${field?.name || fieldId}] ${value}`;
+          })
+          .join('\n');
+        
+        return {
+          studentId: cardData.studentId,
+          classId: selectedClassId,
+          feedDate: selectedDate,
+          attendanceStatus: cardData.attendanceStatus,
+          absenceReason: cardData.absenceReason,
+          absenceReasonDetail: cardData.absenceReasonDetail,
+          notifyParent: cardData.notifyParent,
+          isMakeup: cardData.isMakeup,
+          progressText: cardData.attendanceStatus === 'present' ? cardData.progressText : undefined,
+          memo: memoText || undefined,
+          feedValues: cardData.attendanceStatus === 'present'
+            ? Object.entries(cardData.feedValues)
+                .filter(([_, optionId]) => optionId)
+                .map(([setId, optionId]) => ({ setId, optionId: optionId! }))
+            : [],
+          materials: cardData.materials.map(m => ({
+            materialName: m.materialName,
+            quantity: m.quantity,
+          })),
+          idempotencyKey: generateIdempotencyKey(),
+        };
+      });
       
       const result = await saveAllFeeds(payloads);
       
@@ -573,6 +665,7 @@ export function useFeedInput() {
     handleNotifyParentChange,
     handleProgressChange,
     handleMemoChange,
+    handleFeedValueChange,
     handleSave,
     handleSaveAll,
     
@@ -581,6 +674,7 @@ export function useFeedInput() {
     isSaving,
     savingStudentId,
     hasDirtyCards,
+    dirtyCount: Object.values(cardDataMap).filter(c => c.isDirty || c.status === 'dirty').length,
     
     // 보강생 검색
     makeupSearch,
@@ -588,5 +682,11 @@ export function useFeedInput() {
     makeupResults,
     isSearchingMakeup,
     addMakeupStudent,
+    
+    // 메모 필드 관리
+    memoFields,
+    addMemoField,
+    removeMemoField,
+    renameMemoField,
   };
 }

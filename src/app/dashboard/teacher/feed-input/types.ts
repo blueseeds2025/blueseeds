@@ -42,8 +42,7 @@ export interface FeedOption {
 }
 
 // 출결 상태
-export type AttendanceStatus = 'present' | 'absent';
-
+export type AttendanceStatus = 'present' | 'late' | 'absent';
 // 결석 사유
 export type AbsenceReason = 
   | '병결' 
@@ -59,6 +58,13 @@ export type CardStatus =
   | 'error'    // 🔴 필수값 누락
   | 'dirty'    // 🟡 변경됨 (미저장)
   | 'saved';   // 🟢 저장 완료
+
+// 메모 필드 정의
+export interface MemoField {
+  id: string;
+  name: string;
+  isFixed: boolean;  // 특이사항은 고정
+}
 
 // 학생 카드 데이터 (로컬 상태)
 export interface StudentCardData {
@@ -79,8 +85,8 @@ export interface StudentCardData {
   // 피드 항목별 값
   feedValues: Record<string, string | null>;  // set_id → option_id
   
-  // 메모
-  memos: string[];
+  // 메모 (필드별)
+  memoValues: Record<string, string>;  // field_id → 내용
   
   // 교재 사용 (ON/OFF 가능)
   materials: MaterialUsage[];

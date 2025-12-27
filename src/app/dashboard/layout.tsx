@@ -77,7 +77,7 @@ export default function DashboardLayout({
     { 
       icon: FileText, 
       label: '피드 입력', 
-      href: '/dashboard/feeds',
+      href: '/dashboard/teacher/feed-input',
       show: true 
     },
     { 

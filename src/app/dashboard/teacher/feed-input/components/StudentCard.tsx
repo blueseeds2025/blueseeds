@@ -4,15 +4,15 @@ import { useState } from 'react';
 import { 
   StudentCardData, 
   FeedOptionSet, 
-  CardStatus,
   AttendanceStatus,
   AbsenceReason,
-  TenantSettings 
+  TenantSettings,
+  MemoField,
 } from '../types';
 import { 
   CARD_STATUS_STYLES, 
   ABSENCE_REASONS,
-  TOAST_MESSAGES 
+  ATTENDANCE_OPTIONS,
 } from '../constants';
 import { 
   AlertDialog,
@@ -29,11 +29,12 @@ interface StudentCardProps {
   data: StudentCardData;
   optionSets: FeedOptionSet[];
   tenantSettings: TenantSettings;
-  onOpenBottomSheet: (studentId: string, setId: string) => void;
+  memoFields: MemoField[];
+  onOpenOptionPicker: (studentId: string, setId: string, anchorEl: HTMLElement) => void;
   onAttendanceChange: (studentId: string, status: AttendanceStatus, reason?: AbsenceReason, detail?: string) => void;
   onNotifyParentChange: (studentId: string, notify: boolean) => void;
   onProgressChange: (studentId: string, progress: string) => void;
-  onMemoChange: (studentId: string, memo: string) => void;
+  onMemoChange: (studentId: string, fieldId: string, value: string) => void;
   onSave: (studentId: string) => Promise<void>;
   isSaving: boolean;
 }
@@ -42,7 +43,8 @@ export default function StudentCard({
   data,
   optionSets,
   tenantSettings,
-  onOpenBottomSheet,
+  memoFields,
+  onOpenOptionPicker,
   onAttendanceChange,
   onNotifyParentChange,
   onProgressChange,
@@ -51,13 +53,12 @@ export default function StudentCard({
   isSaving,
 }: StudentCardProps) {
   const [showAbsenceConfirm, setShowAbsenceConfirm] = useState(false);
-  const [showReasonDetail, setShowReasonDetail] = useState(false);
   const [reasonDetail, setReasonDetail] = useState(data.absenceReasonDetail || '');
   
   const isAbsent = data.attendanceStatus === 'absent';
+  const isLate = data.attendanceStatus === 'late';
   const styles = CARD_STATUS_STYLES[data.status];
   
-  // 결석 저장 확인 핸들러
   const handleSaveClick = () => {
     if (isAbsent) {
       setShowAbsenceConfirm(true);
@@ -66,234 +67,280 @@ export default function StudentCard({
     }
   };
   
-  // 결석 확정 후 저장
   const handleConfirmAbsenceSave = () => {
     setShowAbsenceConfirm(false);
     onSave(data.studentId);
   };
   
-  // 출결 변경 핸들러
-  const handleAttendanceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const value = e.target.value;
+  const handleAttendanceStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value as AttendanceStatus;
+    onAttendanceChange(data.studentId, value);
     
-    if (value === 'present') {
-      onAttendanceChange(data.studentId, 'present');
-    } else {
-      // 결석 사유 선택
-      const reason = value as AbsenceReason;
-      const autoNotify = ABSENCE_REASONS.find(r => r.value === reason)?.autoNotify || false;
-      
-      if (reason === '기타') {
-        setShowReasonDetail(true);
-      }
-      
-      onAttendanceChange(data.studentId, 'absent', reason);
-      
-      // 무단/지각은 자동 알림 ON
-      if (autoNotify) {
-        onNotifyParentChange(data.studentId, true);
-      }
+    // 지각 선택 시 자동으로 학부모 알림 ON
+    if (value === 'late') {
+      onNotifyParentChange(data.studentId, true);
     }
   };
   
-  // 옵션 라벨 가져오기
+  const handleAbsenceReasonChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const reason = e.target.value as AbsenceReason;
+    const autoNotify = ABSENCE_REASONS.find(r => r.value === reason)?.autoNotify || false;
+    onAttendanceChange(data.studentId, 'absent', reason);
+    if (autoNotify) {
+      onNotifyParentChange(data.studentId, true);
+    }
+  };
+  
   const getOptionLabel = (setId: string): string => {
     const optionId = data.feedValues[setId];
     if (!optionId) return '선택';
-    
     const set = optionSets.find(s => s.id === setId);
     const option = set?.options.find(o => o.id === optionId);
     return option?.label || '선택';
   };
   
-  // 저장 버튼 텍스트
-  const saveButtonText = isAbsent ? '결석 저장' : '저장';
+  const isSaveDisabled = isSaving || data.status === 'saved' || data.status === 'empty';
+
+  const getSaveButtonStyle = () => {
+    if (isAbsent) return 'bg-[#DC2626] hover:bg-[#B91C1C] text-white';
+    if (data.status === 'saved') return 'bg-[#D1FAE5] text-[#059669] font-semibold';
+    if (data.status === 'error') return 'bg-[#EF4444] hover:bg-[#DC2626] text-white';
+    if (data.status === 'dirty') return 'bg-[#6366F1] hover:bg-[#4F46E5] text-white';
+    return 'bg-[#E5E7EB] text-[#9CA3AF]';
+  };
+
+ const getCardBg = () => {
+    // 저장됨 상태가 최우선
+    if (data.status === 'saved') return 'bg-[#ECFDF5]';
+    if (data.status === 'error') return 'bg-[#FEF2F2]';
+    
+    // 출결 상태에 따른 배경
+    if (isAbsent) return 'bg-[#FEF2F2]';
+    if (isLate) return 'bg-[#FEF9E7]';
+    if (data.status === 'dirty') return 'bg-[#FFFBEB]';
+    
+    return 'bg-white';
+  };
+
+  const getAttendanceSelectStyle = () => {
+    if (isAbsent) return 'border-[#FCA5A5] bg-[#FEF2F2] text-[#DC2626]';
+    if (isLate) return 'border-[#FCD34D] bg-[#FEF9E7] text-[#B45309]';
+    return 'border-[#E5E7EB] bg-white text-[#1F2937]';
+  };
   
   return (
     <>
       <div 
-        className={`
-          rounded-lg border-2 p-4 transition-all
-          ${styles.border} ${styles.bg}
-          ${isAbsent ? 'opacity-80' : ''}
-        `}
+        className={`rounded-xl transition-all duration-200 hover:shadow-lg ${getCardBg()}`}
+        style={{
+          boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
+        }}
       >
-        {/* 헤더: 학생 이름 + 상태 뱃지 */}
-        <div className="flex items-center justify-between mb-3">
+        {/* 헤더 */}
+        <div className="flex items-center justify-between px-3 py-2.5 border-b border-black/5">
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-lg">{data.studentName}</span>
+            <span className="font-bold text-[#1F2937]">{data.studentName}</span>
             {data.isMakeup && (
-              <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full font-medium">
+              <span className="px-2 py-0.5 bg-[#EDE9FE] text-[#7C3AED] text-xs rounded-full font-semibold">
                 보강
               </span>
             )}
+            {isLate && (
+              <span className="px-2 py-0.5 bg-[#FEF3C7] text-[#B45309] text-xs rounded-full font-semibold">
+                지각
+              </span>
+            )}
             {isAbsent && (
-              <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded-full font-medium">
+              <span className="px-2 py-0.5 bg-[#FEE2E2] text-[#DC2626] text-xs rounded-full font-semibold">
                 결석
               </span>
             )}
           </div>
-          <span className="text-lg">{styles.badge}</span>
+          <div className={`w-3 h-3 rounded-full ${styles.dot}`} />
         </div>
         
-        {/* 출결 선택 */}
-        <div className="mb-3">
-          <label className="block text-sm text-gray-600 mb-1">출결</label>
-          <select
-            value={isAbsent ? data.absenceReason || '' : 'present'}
-            onChange={handleAttendanceChange}
-            className={`
-              w-full px-3 py-2 border rounded-lg text-sm
-              ${isAbsent ? 'border-red-300 bg-red-50' : 'border-gray-300'}
-            `}
-          >
-            <option value="present">✅ 출석</option>
-            <optgroup label="결석 사유">
-              {ABSENCE_REASONS.map(reason => (
-                <option key={reason.value} value={reason.value}>
-                  {reason.label}
-                </option>
+        {/* 바디 */}
+        <div className="p-3 space-y-3">
+          {/* 출결 */}
+          <div>
+            <label className="block text-xs font-semibold text-[#6B7280] mb-1">출결</label>
+            <select
+              value={data.attendanceStatus}
+              onChange={handleAttendanceStatusChange}
+              className={`
+                w-full px-3 py-2 border rounded-lg text-sm font-medium
+                focus:outline-none focus:ring-2 focus:ring-[#6366F1]/30
+                ${getAttendanceSelectStyle()}
+              `}
+            >
+              {ATTENDANCE_OPTIONS.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
-            </optgroup>
-          </select>
-          
-          {/* 기타 사유 입력 */}
-          {isAbsent && data.absenceReason === '기타' && (
-            <input
-              type="text"
-              placeholder="결석 사유 입력"
-              value={reasonDetail}
-              onChange={(e) => {
-                setReasonDetail(e.target.value);
-                onAttendanceChange(data.studentId, 'absent', '기타', e.target.value);
-              }}
-              className="w-full mt-2 px-3 py-2 border border-gray-300 rounded-lg text-sm"
-            />
-          )}
-          
-          {/* 학부모 알림 체크 */}
-          {isAbsent && (
-            <label className="flex items-center gap-2 mt-2 text-sm">
-              <input
-                type="checkbox"
-                checked={data.notifyParent}
-                onChange={(e) => onNotifyParentChange(data.studentId, e.target.checked)}
-                className="rounded"
-              />
-              <span>학부모 알림</span>
-              {(data.absenceReason === '무단' || data.absenceReason === '지각') && (
-                <span className="text-xs text-red-500">(자동 ON)</span>
-              )}
-            </label>
-          )}
-        </div>
-        
-        {/* 진도 (ON일 때만) */}
-        {tenantSettings.progress_enabled && (
-          <div className={`mb-3 ${isAbsent ? 'opacity-50 pointer-events-none' : ''}`}>
-            <label className="block text-sm text-gray-600 mb-1">
-              진도
-              {data.previousProgress && (
-                <span className="text-xs text-gray-400 ml-2">
-                  (이전: {data.previousProgress})
-                </span>
-              )}
-            </label>
-            <input
-              type="text"
-              placeholder={data.previousProgress || '진도 입력'}
-              value={data.progressText || ''}
-              onChange={(e) => onProgressChange(data.studentId, e.target.value)}
-              disabled={isAbsent}
-              maxLength={100}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100"
-            />
+            </select>
           </div>
-        )}
-        
-        {/* 피드 항목들 */}
-        <div className={`space-y-2 mb-3 ${isAbsent ? 'opacity-50 pointer-events-none' : ''}`}>
-          {optionSets.map(set => {
-            const currentValue = data.feedValues[set.id];
-            const isEmpty = !currentValue;
-            const isRequired = set.is_required;
-            
-            return (
-              <div key={set.id}>
-                <label className="block text-sm text-gray-600 mb-1">
-                  {set.name}
-                  {isRequired && <span className="text-red-500 ml-1">*</span>}
-                </label>
-                <button
-                  onClick={() => !isAbsent && onOpenBottomSheet(data.studentId, set.id)}
-                  disabled={isAbsent}
-                  className={`
-                    w-full px-3 py-2 border rounded-lg text-sm text-left
-                    transition-colors
-                    ${isEmpty && isRequired && !isAbsent
-                      ? 'border-red-300 bg-red-50'
-                      : 'border-gray-300 hover:border-indigo-400'
-                    }
-                    disabled:bg-gray-100 disabled:cursor-not-allowed
-                  `}
-                >
-                  {getOptionLabel(set.id)}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-        
-        {/* 메모 */}
-        <div className={`mb-4 ${isAbsent ? 'opacity-50' : ''}`}>
-          <label className="block text-sm text-gray-600 mb-1">메모 (내부용)</label>
-          <textarea
-            placeholder="메모 입력"
-            value={data.memos[0] || ''}
-            onChange={(e) => onMemoChange(data.studentId, e.target.value)}
-            disabled={isAbsent}
-            rows={2}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm resize-none disabled:bg-gray-100"
-          />
+          
+          {/* 지각 - 학부모 알림 */}
+          {isLate && (
+            <div className="p-3 bg-[#FFFBEB] rounded-lg border border-[#FCD34D]">
+              <label className="flex items-center gap-2 text-xs text-[#92400E]">
+                <input
+                  type="checkbox"
+                  checked={data.notifyParent}
+                  onChange={(e) => onNotifyParentChange(data.studentId, e.target.checked)}
+                  className="rounded border-[#FCD34D] text-[#F59E0B]"
+                />
+                <span className="font-medium">학부모 알림</span>
+                <span className="text-[#B45309]">(자동)</span>
+              </label>
+            </div>
+          )}
+          
+          {/* 결석 사유 */}
+          {isAbsent && (
+            <div className="p-3 bg-white/60 rounded-lg border border-[#FECACA]">
+              <label className="block text-xs font-semibold text-[#DC2626] mb-1">
+                결석 사유 <span className="text-[#EF4444]">*</span>
+              </label>
+              <select
+                value={data.absenceReason || ''}
+                onChange={handleAbsenceReasonChange}
+                className="w-full px-3 py-2 border border-[#E5E7EB] rounded-lg text-sm bg-white text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#EF4444]/30"
+              >
+                <option value="">선택</option>
+                {ABSENCE_REASONS.map(r => (
+                  <option key={r.value} value={r.value}>{r.label}</option>
+                ))}
+              </select>
+              
+              {data.absenceReason === '기타' && (
+                <input
+                  type="text"
+                  placeholder="사유 입력"
+                  value={reasonDetail}
+                  onChange={(e) => {
+                    setReasonDetail(e.target.value);
+                    onAttendanceChange(data.studentId, 'absent', '기타', e.target.value);
+                  }}
+                  className="w-full mt-2 px-3 py-2 border border-[#E5E7EB] rounded-lg text-sm bg-white"
+                />
+              )}
+              
+              <label className="flex items-center gap-2 mt-2 text-xs text-[#6B7280]">
+                <input
+                  type="checkbox"
+                  checked={data.notifyParent}
+                  onChange={(e) => onNotifyParentChange(data.studentId, e.target.checked)}
+                  className="rounded border-[#D1D5DB] text-[#6366F1]"
+                />
+                <span>학부모 알림</span>
+                {data.absenceReason === '무단' && (
+                  <span className="text-[#F59E0B] font-semibold">(자동)</span>
+                )}
+              </label>
+            </div>
+          )}
+          
+          {/* 진도 - 등원/지각일 때만 */}
+          {tenantSettings.progress_enabled && !isAbsent && (
+            <div>
+              <label className="block text-xs font-semibold text-[#6B7280] mb-1">
+                진도
+                {data.previousProgress && (
+                  <span className="text-[#9CA3AF] font-normal ml-1">(이전: {data.previousProgress})</span>
+                )}
+              </label>
+              <input
+                type="text"
+                placeholder={data.previousProgress || '진도 입력'}
+                value={data.progressText || ''}
+                onChange={(e) => onProgressChange(data.studentId, e.target.value)}
+                className="w-full px-3 py-2 border border-[#E5E7EB] rounded-lg text-sm text-[#1F2937] placeholder-[#9CA3AF] bg-white focus:outline-none focus:ring-2 focus:ring-[#6366F1]/30"
+              />
+            </div>
+          )}
+          
+          {/* 피드 항목 - 등원/지각일 때만 */}
+          {!isAbsent && optionSets.length > 0 && (
+            <div className="grid grid-cols-2 gap-2">
+              {optionSets.map(set => {
+                const isEmpty = !data.feedValues[set.id];
+                return (
+                  <div key={set.id}>
+                    <label className="block text-xs font-semibold text-[#6B7280] mb-1">
+                      {set.name}<span className="text-[#EF4444]">*</span>
+                    </label>
+                    <button
+                      onClick={(e) => onOpenOptionPicker(data.studentId, set.id, e.currentTarget)}
+                      className={`
+                        w-full px-3 py-2 border rounded-lg text-sm text-left font-medium
+                        transition-colors hover:opacity-80
+                        ${isEmpty
+                          ? 'border-[#FECACA] bg-[#FEF2F2] text-[#DC2626]'
+                          : 'border-[#6EE7B7] bg-[#D1FAE5] text-[#059669]'
+                        }
+                      `}
+                    >
+                      {getOptionLabel(set.id)}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          
+          {/* 메모 - 등원/지각일 때만 */}
+          {!isAbsent && memoFields.length > 0 && (
+            <div className="space-y-2">
+              {memoFields.map((field) => (
+                <div key={field.id}>
+                  <label className="block text-xs font-semibold text-[#6B7280] mb-1">
+                    {field.name}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={`${field.name} 입력`}
+                    value={data.memoValues[field.id] || ''}
+                    onChange={(e) => onMemoChange(data.studentId, field.id, e.target.value)}
+                    className="w-full px-3 py-2 border border-[#E5E7EB] rounded-lg text-sm text-[#1F2937] placeholder-[#9CA3AF] bg-white focus:outline-none focus:ring-2 focus:ring-[#6366F1]/30"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         
         {/* 저장 버튼 */}
-        <button
-          onClick={handleSaveClick}
-          disabled={isSaving || data.status === 'saved'}
-          className={`
-            w-full py-2 rounded-lg font-medium transition-colors
-            ${isAbsent
-              ? 'bg-red-500 hover:bg-red-600 text-white'
-              : data.status === 'saved'
-                ? 'bg-green-100 text-green-700 cursor-default'
-                : 'bg-indigo-500 hover:bg-indigo-600 text-white'
-            }
-            disabled:opacity-50 disabled:cursor-not-allowed
-          `}
-        >
-          {isSaving ? '저장 중...' : data.status === 'saved' ? '✓ 저장됨' : saveButtonText}
-        </button>
+        <div className="px-3 pb-3">
+          <button
+            onClick={handleSaveClick}
+            disabled={isSaveDisabled}
+            className={`
+              w-full py-2.5 rounded-lg text-sm font-semibold transition-all
+              ${getSaveButtonStyle()}
+              disabled:opacity-50 disabled:cursor-not-allowed
+            `}
+          >
+            {isSaving ? '저장 중...' : data.status === 'saved' ? '✓ 저장됨' : isAbsent ? '결석 저장' : '저장'}
+          </button>
+        </div>
       </div>
       
-      {/* 결석 저장 확인 다이얼로그 */}
+      {/* 결석 확인 다이얼로그 */}
       <AlertDialog open={showAbsenceConfirm} onOpenChange={setShowAbsenceConfirm}>
-        <AlertDialogContent>
+        <AlertDialogContent className="rounded-xl">
           <AlertDialogHeader>
-            <AlertDialogTitle>결석으로 저장</AlertDialogTitle>
-            <AlertDialogDescription>
+            <AlertDialogTitle className="text-[#1F2937]">결석으로 저장</AlertDialogTitle>
+            <AlertDialogDescription className="text-[#6B7280]">
               {data.studentName} 학생을 결석으로 저장할까요?
               <br />
-              <span className="text-red-500 font-medium">
-                다른 항목은 저장되지 않습니다.
-              </span>
+              <span className="text-[#DC2626] font-medium">다른 항목은 저장되지 않습니다.</span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogCancel className="rounded-lg">취소</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleConfirmAbsenceSave}
-              className="bg-red-500 hover:bg-red-600"
+              className="rounded-lg bg-[#DC2626] hover:bg-[#B91C1C] text-white"
             >
               결석 저장
             </AlertDialogAction>

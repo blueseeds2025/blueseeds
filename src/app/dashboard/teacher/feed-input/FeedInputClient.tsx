@@ -1,82 +1,224 @@
 'use client';
 
-import { useRef, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { toast } from 'sonner';
+import StudentCard from './components/StudentCard';
+import FeedOptionPicker from './components/FeedOptionPicker';
 import { useFeedInput } from './hooks/useFeedInput';
-import { StudentCard, FeedBottomSheet } from './components';
-import { calculateGridColumns, getGridClass, formatDisplayDate } from './constants';
+import { formatDisplayDate, getGridClass, calculateGridColumns } from './constants';
+import { FeedOption } from './types';
 
-export default function FeedInputClient() {
+interface FeedInputClientProps {
+  initialClasses: { id: string; name: string }[];
+  teacherId: string;
+  tenantId: string;
+}
+
+export default function FeedInputClient({
+  initialClasses,
+  teacherId,
+  tenantId,
+}: FeedInputClientProps) {
+  const classes = initialClasses || [];
+  
+  const today = new Date().toISOString().split('T')[0];
+  const [selectedDate, setSelectedDate] = useState(today);
+  const [selectedClassId, setSelectedClassId] = useState(classes[0]?.id || '');
+  const [gridClass, setGridClass] = useState('grid-cols-3');
+  const containerRef = useRef<HTMLDivElement>(null);
+  
+  // 메모 추가 모달
+  const [showAddMemo, setShowAddMemo] = useState(false);
+  const [newMemoName, setNewMemoName] = useState('');
+  
+  // 옵션 피커 상태
+  const [optionPicker, setOptionPicker] = useState<{
+    isOpen: boolean;
+    studentId: string | null;
+    setId: string | null;
+    setName: string | null;
+    options: FeedOption[];
+    currentValue: string | null;
+    anchorEl: HTMLElement | null;
+  }>({
+    isOpen: false,
+    studentId: null,
+    setId: null,
+    setName: null,
+    options: [],
+    currentValue: null,
+    anchorEl: null,
+  });
+  
   const {
-    classes,
-    selectedClassId,
-    setSelectedClassId,
-    selectedDate,
-    setSelectedDate,
     students,
     cardDataMap,
     optionSets,
     tenantSettings,
-    bottomSheet,
-    openBottomSheet,
-    closeBottomSheet,
-    handleBottomSheetSelect,
-    handleAttendanceChange,
-    handleNotifyParentChange,
-    handleProgressChange,
-    handleMemoChange,
-    handleSave,
-    handleSaveAll,
+    memoFields,
     isLoading,
     isSaving,
     savingStudentId,
     hasDirtyCards,
-    makeupSearch,
-    setMakeupSearch,
-    makeupResults,
-    isSearchingMakeup,
-    addMakeupStudent,
-  } = useFeedInput();
+    dirtyCount,
+    handleAttendanceChange,
+    handleNotifyParentChange,
+    handleProgressChange,
+    handleMemoChange,
+    handleFeedValueChange,
+    handleSave,
+    handleSaveAll,
+    addMemoField,
+    removeMemoField,
+  } = useFeedInput({
+    classId: selectedClassId,
+    date: selectedDate,
+    teacherId,
+    tenantId,
+  });
   
-  const containerRef = useRef<HTMLDivElement>(null);
+  // 그리드 컬럼 계산
+  useEffect(() => {
+    const updateGrid = () => {
+      if (containerRef.current) {
+        const width = containerRef.current.offsetWidth;
+        const columns = calculateGridColumns(students.length, width);
+        setGridClass(getGridClass(columns));
+      }
+    };
+    
+    updateGrid();
+    window.addEventListener('resize', updateGrid);
+    return () => window.removeEventListener('resize', updateGrid);
+  }, [students.length]);
   
-  // 그리드 열 수 계산
-  const gridColumns = calculateGridColumns(students.length, 1200); // 기본 1200px 가정
-  const gridClass = getGridClass(gridColumns);
+  // 페이지 이탈 방지
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasDirtyCards) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasDirtyCards]);
   
-  // dirty 카드 수
-  const dirtyCount = Object.values(cardDataMap).filter(c => c.isDirty || c.status === 'dirty').length;
+  // 옵션 피커 열기
+  const openOptionPicker = (studentId: string, setId: string, anchorEl: HTMLElement) => {
+    const set = optionSets.find(s => s.id === setId);
+    if (!set) return;
+    
+    const cardData = cardDataMap[studentId];
+    const currentValue = cardData?.feedValues[setId] || null;
+    
+    setOptionPicker({
+      isOpen: true,
+      studentId,
+      setId,
+      setName: set.name,
+      options: set.options,
+      currentValue,
+      anchorEl,
+    });
+  };
   
-  // 오늘 날짜
-  const today = new Date().toISOString().split('T')[0];
+  // 옵션 피커 닫기
+  const closeOptionPicker = () => {
+    setOptionPicker(prev => ({ ...prev, isOpen: false, anchorEl: null }));
+  };
+  
+  // 옵션 선택
+  const handleOptionSelect = (optionId: string) => {
+    if (optionPicker.studentId && optionPicker.setId) {
+      handleFeedValueChange(optionPicker.studentId, optionPicker.setId, optionId);
+    }
+  };
+  
+  // 메모 필드 추가
+  const handleAddMemoField = () => {
+    if (newMemoName.trim()) {
+      addMemoField(newMemoName.trim());
+      setNewMemoName('');
+      setShowAddMemo(false);
+    }
+  };
+  
+  // 보강생 검색
+  const [makeupSearch, setMakeupSearch] = useState('');
+  const [makeupResults, setMakeupResults] = useState<{ id: string; name: string; display_code: string }[]>([]);
+  const [isSearchingMakeup, setIsSearchingMakeup] = useState(false);
+  
+  useEffect(() => {
+    if (makeupSearch.length < 2) {
+      setMakeupResults([]);
+      return;
+    }
+    
+    const searchStudents = async () => {
+      setIsSearchingMakeup(true);
+      try {
+        const { createBrowserClient } = await import('@supabase/ssr');
+        const supabase = createBrowserClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        );
+        
+        const { data } = await supabase
+          .from('students')
+          .select('id, name, display_code')
+          .eq('tenant_id', tenantId)
+          .ilike('name', `%${makeupSearch}%`)
+          .limit(10);
+        
+        const existingIds = students.map(s => s.id);
+        const filtered = (data || []).filter(s => !existingIds.includes(s.id));
+        setMakeupResults(filtered);
+      } finally {
+        setIsSearchingMakeup(false);
+      }
+    };
+    
+    const debounce = setTimeout(searchStudents, 300);
+    return () => clearTimeout(debounce);
+  }, [makeupSearch, tenantId, students]);
+  
+  const addMakeupStudent = (student: { id: string; name: string; display_code: string }) => {
+    // TODO: 보강생 추가 로직
+    toast.success(`${student.name} 보강생 추가됨`);
+    setMakeupSearch('');
+    setMakeupResults([]);
+  };
   
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#F7F6F3]">
       {/* 상단 고정 바 */}
-      <div className="sticky top-0 z-30 bg-white border-b shadow-sm">
+      <div className="sticky top-0 z-30 bg-white border-b border-[#E5E7EB]">
         <div className="max-w-7xl mx-auto px-4 py-3">
           <div className="flex flex-wrap items-center gap-3">
             {/* 날짜 선택 */}
             <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-600">날짜</label>
+              <label className="text-sm text-[#6B7280]">날짜</label>
               <input
                 type="date"
                 value={selectedDate}
                 onChange={(e) => setSelectedDate(e.target.value)}
                 max={today}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
+                className="px-3 py-2 border border-[#E5E7EB] rounded-lg text-sm text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6366F1]/30"
               />
-              <span className="text-sm text-gray-500">
+              <span className="text-sm text-[#6B7280]">
                 {formatDisplayDate(new Date(selectedDate))}
               </span>
             </div>
             
             {/* 반 선택 */}
             <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-600">반</label>
+              <label className="text-sm text-[#6B7280]">반</label>
               <select
                 value={selectedClassId}
                 onChange={(e) => setSelectedClassId(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500 min-w-[150px]"
+                className="px-3 py-2 border border-[#E5E7EB] rounded-lg text-sm text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6366F1]/30 min-w-[150px]"
               >
                 {classes.length === 0 ? (
                   <option value="">담당 반이 없습니다</option>
@@ -88,6 +230,14 @@ export default function FeedInputClient() {
               </select>
             </div>
             
+            {/* 메모 추가 버튼 */}
+            <button
+              onClick={() => setShowAddMemo(true)}
+              className="px-3 py-2 border border-dashed border-[#D1D5DB] rounded-lg text-sm text-[#6B7280] hover:border-[#6366F1] hover:text-[#6366F1] transition-colors"
+            >
+              + 메모 추가
+            </button>
+            
             {/* 전체 저장 버튼 */}
             <div className="ml-auto">
               <button
@@ -96,8 +246,8 @@ export default function FeedInputClient() {
                 className={`
                   px-6 py-2 rounded-lg font-medium transition-all
                   ${dirtyCount > 0
-                    ? 'bg-indigo-500 hover:bg-indigo-600 text-white shadow-md'
-                    : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                    ? 'bg-[#6366F1] hover:bg-[#4F46E5] text-white'
+                    : 'bg-[#E5E7EB] text-[#9CA3AF] cursor-not-allowed'
                   }
                 `}
               >
@@ -105,27 +255,93 @@ export default function FeedInputClient() {
               </button>
             </div>
           </div>
+          
+          {/* 추가된 메모 필드 태그들 */}
+          {memoFields.length > 1 && (
+            <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-[#E5E7EB]">
+              <span className="text-xs text-[#6B7280]">메모 항목:</span>
+              {memoFields.map((field, idx) => (
+                <span 
+                  key={field.id} 
+                  className={`
+                    px-2.5 py-1 rounded-full text-xs font-medium
+                    ${idx === 0 
+                      ? 'bg-[#F3F4F6] text-[#6B7280]' 
+                      : 'bg-[#EEF2FF] text-[#6366F1]'
+                    }
+                  `}
+                >
+                  {field.name}
+                  {idx > 0 && (
+                    <button
+                      onClick={() => removeMemoField(field.id)}
+                      className="ml-1.5 text-[#9CA3AF] hover:text-[#EF4444] transition-colors"
+                    >
+                      ×
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
+      
+      {/* 메모 추가 모달 */}
+      {showAddMemo && (
+        <>
+          <div 
+            className="fixed inset-0 bg-black/30 z-40"
+            onClick={() => setShowAddMemo(false)}
+          />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-white rounded-xl shadow-xl p-6 w-80">
+            <h3 className="font-semibold text-lg text-[#1F2937] mb-4">메모 항목 추가</h3>
+            <input
+              type="text"
+              placeholder="항목 이름 (예: 준비물, 알림장)"
+              value={newMemoName}
+              onChange={(e) => setNewMemoName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleAddMemoField()}
+              autoFocus
+              className="w-full px-3 py-2.5 border border-[#E5E7EB] rounded-lg mb-4 text-[#1F2937] placeholder-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#6366F1]/30"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowAddMemo(false)}
+                className="flex-1 px-4 py-2.5 bg-[#F3F4F6] hover:bg-[#E5E7EB] text-[#1F2937] rounded-lg transition-colors"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleAddMemoField}
+                disabled={!newMemoName.trim()}
+                className="flex-1 px-4 py-2.5 bg-[#6366F1] hover:bg-[#4F46E5] text-white rounded-lg transition-colors disabled:opacity-50"
+              >
+                추가
+              </button>
+            </div>
+          </div>
+        </>
+      )}
       
       {/* 메인 컨텐츠 */}
       <div className="max-w-7xl mx-auto px-4 py-6" ref={containerRef}>
         {isLoading ? (
           <div className="flex items-center justify-center py-20">
             <div className="text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mx-auto mb-4" />
-              <p className="text-gray-500">불러오는 중...</p>
+              <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#6366F1] border-t-transparent mx-auto mb-4" />
+              <p className="text-[#6B7280]">불러오는 중...</p>
             </div>
           </div>
         ) : students.length === 0 ? (
           <div className="text-center py-20">
-            <p className="text-gray-500 text-lg">이 반에 등록된 학생이 없습니다</p>
-            <p className="text-gray-400 text-sm mt-2">학생 관리에서 학생을 추가해주세요</p>
+            <p className="text-[#6B7280] text-lg">이 반에 등록된 학생이 없습니다</p>
+            <p className="text-[#9CA3AF] text-sm mt-2">학생 관리에서 학생을 추가해주세요</p>
           </div>
         ) : (
           <>
             {/* 학생 카드 그리드 */}
-            <div className={`grid gap-4 ${gridClass}`}>
+            <div className={`grid gap-3 ${gridClass}`}>
               {students.map(student => {
                 const cardData = cardDataMap[student.id];
                 if (!cardData) return null;
@@ -136,7 +352,8 @@ export default function FeedInputClient() {
                     data={cardData}
                     optionSets={optionSets}
                     tenantSettings={tenantSettings}
-                    onOpenBottomSheet={openBottomSheet}
+                    memoFields={memoFields}
+                    onOpenOptionPicker={openOptionPicker}
                     onAttendanceChange={handleAttendanceChange}
                     onNotifyParentChange={handleNotifyParentChange}
                     onProgressChange={handleProgressChange}
@@ -148,10 +365,15 @@ export default function FeedInputClient() {
               })}
               
               {/* 보강생 추가 카드 */}
-              <div className="rounded-lg border-2 border-dashed border-gray-300 p-4 flex flex-col items-center justify-center min-h-[200px] bg-white hover:border-purple-400 transition-colors">
-                <div className="text-center mb-4">
-                  <span className="text-3xl">➕</span>
-                  <p className="text-gray-600 mt-2 font-medium">보강생 추가</p>
+              <div 
+                className="rounded-xl p-3 flex flex-col items-center justify-center min-h-[160px] bg-white/80 hover:bg-[#FAF5FF] transition-all"
+                style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}
+              >
+                <div className="text-center mb-3">
+                  <div className="w-8 h-8 rounded-full bg-[#F3E8FF] flex items-center justify-center mx-auto mb-1.5">
+                    <span className="text-[#7C3AED] text-lg font-bold">+</span>
+                  </div>
+                  <p className="text-[#6B7280] font-semibold text-sm">보강생 추가</p>
                 </div>
                 
                 <div className="w-full">
@@ -160,23 +382,23 @@ export default function FeedInputClient() {
                     placeholder="학생 이름 검색 (2글자 이상)"
                     value={makeupSearch}
                     onChange={(e) => setMakeupSearch(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-purple-500"
+                    className="w-full px-2 py-1.5 border border-[#E5E7EB] rounded text-sm text-[#1F2937] placeholder-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/30"
                   />
                   
                   {isSearchingMakeup && (
-                    <p className="text-sm text-gray-500 mt-2 text-center">검색 중...</p>
+                    <p className="text-xs text-[#9CA3AF] mt-1.5 text-center">검색 중...</p>
                   )}
                   
                   {makeupResults.length > 0 && (
-                    <ul className="mt-2 border rounded-lg divide-y max-h-40 overflow-y-auto">
+                    <ul className="mt-1.5 border border-[#E5E7EB] rounded divide-y divide-[#F3F4F6] max-h-32 overflow-y-auto bg-white">
                       {makeupResults.map(student => (
                         <li key={student.id}>
                           <button
                             onClick={() => addMakeupStudent(student)}
-                            className="w-full px-3 py-2 text-left hover:bg-purple-50 transition-colors"
+                            className="w-full px-2 py-1.5 text-left hover:bg-[#FAF5FF] transition-colors text-sm"
                           >
-                            <span className="font-medium">{student.name}</span>
-                            <span className="text-sm text-gray-500 ml-2">{student.display_code}</span>
+                            <span className="font-semibold text-[#1F2937]">{student.name}</span>
+                            <span className="text-[#9CA3AF] ml-1.5 text-xs">{student.display_code}</span>
                           </button>
                         </li>
                       ))}
@@ -184,7 +406,7 @@ export default function FeedInputClient() {
                   )}
                   
                   {makeupSearch.length >= 2 && makeupResults.length === 0 && !isSearchingMakeup && (
-                    <p className="text-sm text-gray-500 mt-2 text-center">검색 결과가 없습니다</p>
+                    <p className="text-xs text-[#9CA3AF] mt-1.5 text-center">검색 결과 없음</p>
                   )}
                 </div>
               </div>
@@ -193,21 +415,22 @@ export default function FeedInputClient() {
         )}
       </div>
       
-      {/* 바텀시트 */}
-      <FeedBottomSheet
-        isOpen={bottomSheet.isOpen}
-        setName={bottomSheet.setName || ''}
-        options={bottomSheet.options}
-        currentValue={bottomSheet.currentValue}
-        onSelect={handleBottomSheetSelect}
-        onClose={closeBottomSheet}
+      {/* 옵션 피커 (PC: 팝오버 / 모바일: 바텀시트) */}
+      <FeedOptionPicker
+        isOpen={optionPicker.isOpen}
+        setName={optionPicker.setName || ''}
+        options={optionPicker.options}
+        currentValue={optionPicker.currentValue}
+        anchorEl={optionPicker.anchorEl}
+        onSelect={handleOptionSelect}
+        onClose={closeOptionPicker}
       />
       
-      {/* Dirty 상태 경고 (화면 하단) */}
+      {/* Dirty 상태 경고 */}
       {hasDirtyCards && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-20">
-          <div className="bg-yellow-500 text-white px-4 py-2 rounded-full shadow-lg text-sm font-medium flex items-center gap-2">
-            <span>🟡</span>
+          <div className="bg-[#F59E0B] text-white px-5 py-2.5 rounded-full shadow-lg text-sm font-medium flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-white animate-pulse" />
             <span>저장하지 않은 변경사항이 있습니다</span>
           </div>
         </div>

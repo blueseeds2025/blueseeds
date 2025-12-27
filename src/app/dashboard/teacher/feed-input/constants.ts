@@ -10,32 +10,78 @@ export const ABSENCE_REASONS: { value: AbsenceReason; label: string; autoNotify:
   { value: '가사', label: '가사', autoNotify: false },
   { value: '학교행사', label: '학교행사', autoNotify: false },
   { value: '무단', label: '무단', autoNotify: true },   // 자동 알림 ON
-  { value: '지각', label: '지각', autoNotify: true },   // 자동 알림 ON
   { value: '기타', label: '기타 (직접 입력)', autoNotify: false },
 ];
 
-// 카드 상태 색상
+// 출결 상태 옵션
+export const ATTENDANCE_OPTIONS = [
+  { value: 'present', label: '등원' },
+  { value: 'late', label: '지각' },
+  { value: 'absent', label: '결석' },
+] as const;
+
+// 카드 상태 색상 (노션 스타일 - 진한 톤)
 export const CARD_STATUS_STYLES = {
   empty: {
-    border: 'border-gray-200',
-    bg: 'bg-white',
-    badge: null,
+    card: 'bg-white border-[#D3D1CB]',
+    dot: 'bg-[#9B9A97]',
   },
   error: {
-    border: 'border-red-400',
-    bg: 'bg-red-50',
-    badge: '🔴',
+    card: 'bg-[#FFF5F5] border-[#E53E3E]',
+    dot: 'bg-[#E53E3E]',
   },
   dirty: {
-    border: 'border-yellow-400',
-    bg: 'bg-yellow-50',
-    badge: '🟡',
+    card: 'bg-[#FFFAF0] border-[#DD6B20]',
+    dot: 'bg-[#DD6B20]',
   },
   saved: {
-    border: 'border-green-400',
-    bg: 'bg-green-50',
-    badge: '🟢',
+    card: 'bg-[#F0FFF4] border-[#38A169]',
+    dot: 'bg-[#38A169]',
   },
+} as const;
+
+// 색상 팔레트 (노션 스타일 + 진한 톤)
+export const COLORS = {
+  // 배경
+  pageBg: '#F7F6F3',
+  cardBg: '#FFFFFF',
+  
+  // 텍스트
+  text: '#1A1A1A',
+  textMedium: '#4A4A4A',
+  textLight: '#787774',
+  textMuted: '#9B9A97',
+  
+  // 테두리
+  border: '#D3D1CB',
+  borderLight: '#E8E5E0',
+  
+  // 메인 액센트 (인디고)
+  primary: '#5046E5',
+  primaryHover: '#4338CA',
+  primaryLight: '#EEF2FF',
+  
+  // 상태 (진한 톤)
+  success: '#38A169',
+  successBg: '#F0FFF4',
+  successBorder: '#9AE6B4',
+  
+  warning: '#DD6B20',
+  warningBg: '#FFFAF0',
+  warningBorder: '#FBD38D',
+  
+  error: '#E53E3E',
+  errorBg: '#FFF5F5',
+  errorBorder: '#FEB2B2',
+  
+  // 결석 (진한 핑크)
+  absent: '#C53030',
+  absentBg: '#FFF5F5',
+  absentBorder: '#FC8181',
+  
+  // 보강 (보라)
+  makeup: '#7C3AED',
+  makeupBg: '#F3E8FF',
 } as const;
 
 // 토스트 메시지
