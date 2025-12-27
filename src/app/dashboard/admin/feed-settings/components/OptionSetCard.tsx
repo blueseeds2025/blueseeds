@@ -36,6 +36,7 @@ type Props = {
   expanded: boolean;
 
   isEditMode: boolean;
+  isHighlightAdd?: boolean; // 옵션 추가 입력창 강조 여부
 
   categoryValue: ReportCategory;
   optionList: Option[];
@@ -90,6 +91,7 @@ export default function OptionSetCard({
   set,
   expanded,
   isEditMode,
+  isHighlightAdd = false,
   categoryValue,
   optionList,
 
@@ -115,7 +117,7 @@ export default function OptionSetCard({
   const style: CSSProperties | undefined = undefined;
 
   return (
-    <Card style={style} className={`${feedStyles.card.base} ${!set.is_active ? feedStyles.card.inactive : ''}`}>
+    <Card id={`option-set-${set.id}`} style={style} className={`${feedStyles.card.base} ${!set.is_active ? feedStyles.card.inactive : ''}`}>
       <CardHeader className={feedStyles.layout.cardHeader} onClick={onToggleExpand}>
         <div className={feedStyles.layout.cardHeaderInner}>
           <div className={feedStyles.layout.cardHeaderLeft}>
@@ -316,15 +318,22 @@ export default function OptionSetCard({
           </DndContext>
 
           {/* Add option */}
-          <div className={feedStyles.layout.optionAddRow}>
+          <div className={cn(
+            feedStyles.layout.optionAddRow,
+            isHighlightAdd && optionList.length === 0 && 'p-3 -mx-1 rounded-lg bg-[#EEF2FF] border border-[#6366F1]/30'
+          )}>
             <input
-              className={feedStyles.input.base}
-              placeholder={set.is_scored ? '옵션명 + 점수 (예: 적극적 100)' : '옵션명 (예: 등원)'}
+              className={cn(
+                feedStyles.input.base,
+                isHighlightAdd && optionList.length === 0 && 'border-[#6366F1] bg-white ring-2 ring-[#6366F1]/20'
+              )}
+              placeholder={set.is_scored ? '옵션명 + 점수 (예: 우수 100) / 점수 생략시 점수 제외' : '옵션명 (예: 등원)'}
               value={optionDraft.value}
               onChange={(e) => optionDraft.onChange(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') optionDraft.onAdd();
               }}
+              autoFocus={isHighlightAdd && optionList.length === 0}
             />
 
             <Button 

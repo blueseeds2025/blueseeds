@@ -13,6 +13,73 @@ import {
 } from './types';
 
 // ============================================================================
+// 보강 티켓 헬퍼
+// ============================================================================
+
+interface MakeupTicketParams {
+  feedId: string;
+  tenantId: string;
+  studentId: string;
+  classId: string;
+  feedDate: string;
+  absenceReason?: string;
+  needsMakeup: boolean;
+  attendanceStatus: string;
+}
+
+async function handleMakeupTicket(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  params: MakeupTicketParams
+) {
+  const { feedId, tenantId, studentId, classId, feedDate, absenceReason, needsMakeup, attendanceStatus } = params;
+  
+  // 기존 티켓 확인
+  const { data: existingTicket } = await supabase
+    .from('makeup_tickets')
+    .select('id, status')
+    .eq('feed_id', feedId)
+    .single();
+  
+  // 결석 + 보강 필요 → 티켓 생성/유지
+  if (attendanceStatus === 'absent' && needsMakeup) {
+    if (!existingTicket) {
+      // 새 티켓 생성
+      await supabase
+        .from('makeup_tickets')
+        .insert({
+          tenant_id: tenantId,
+          student_id: studentId,
+          class_id: classId,
+          feed_id: feedId,
+          absence_date: feedDate,
+          absence_reason: absenceReason,
+          status: 'pending',
+        });
+    } else if (existingTicket.status === 'cancelled') {
+      // 취소된 티켓 다시 활성화
+      await supabase
+        .from('makeup_tickets')
+        .update({ 
+          status: 'pending',
+          absence_reason: absenceReason,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existingTicket.id);
+    }
+  }
+  // 결석 아니거나 보강 불필요 → 티켓 취소
+  else if (existingTicket && existingTicket.status === 'pending') {
+    await supabase
+      .from('makeup_tickets')
+      .update({ 
+        status: 'cancelled',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', existingTicket.id);
+  }
+}
+
+// ============================================================================
 // 데이터 조회
 // ============================================================================
 
@@ -201,7 +268,7 @@ export async function getFeedOptionSets(): Promise<{
   }
 }
 
-// 특정 날짜의 저장된 피드 데이터 조회
+// 특정 날짜의 저장된 피드 데이터 조회 (최적화)
 export async function getSavedFeeds(
   classId: string, 
   feedDate: string
@@ -213,9 +280,9 @@ export async function getSavedFeeds(
   try {
     const supabase = await createClient();
     
-    // daily_feeds 조회
+    // student_feeds 조회
     const { data: feeds, error: feedsError } = await supabase
-      .from('daily_feeds')
+      .from('student_feeds')
       .select(`
         id,
         student_id,
@@ -225,50 +292,52 @@ export async function getSavedFeeds(
         notify_parent,
         is_makeup,
         progress_text,
-        memo,
-        status
+        memo_values
       `)
       .eq('class_id', classId)
-      .eq('feed_date', feedDate)
-      .is('deleted_at', null);
+      .eq('feed_date', feedDate);
     
     if (feedsError) throw feedsError;
+    
+    // feed_values 별도 조회
+    const feedIds = (feeds || []).map(f => f.id);
+    let feedValuesMap: Record<string, any[]> = {};
+    
+    if (feedIds.length > 0) {
+      const { data: values, error: valuesError } = await supabase
+        .from('feed_values')
+        .select('feed_id, set_id, option_id, score')
+        .in('feed_id', feedIds);
+      
+      if (valuesError) throw valuesError;
+      
+      // feed_id별로 그룹화
+      for (const v of values || []) {
+        if (!feedValuesMap[v.feed_id]) {
+          feedValuesMap[v.feed_id] = [];
+        }
+        feedValuesMap[v.feed_id].push(v);
+      }
+    }
     
     const result: Record<string, SavedFeedData> = {};
     
     for (const feed of feeds || []) {
-      // 피드 값 조회
-      const { data: values } = await supabase
-        .from('daily_feed_values')
-        .select('set_id, option_id, score')
-        .eq('daily_feed_id', feed.id)
-        .is('deleted_at', null);
-      
-      // 교재 사용 조회
-      const { data: materials } = await supabase
-        .from('daily_feed_materials')
-        .select('id, material_name, quantity')
-        .eq('daily_feed_id', feed.id)
-        .is('deleted_at', null);
+      const values = feedValuesMap[feed.id] || [];
       
       result[feed.student_id] = {
         id: feed.id,
-        attendanceStatus: feed.attendance_status as 'present' | 'absent',
+        attendanceStatus: feed.attendance_status as 'present' | 'late' | 'absent',
         absenceReason: feed.absence_reason,
         absenceReasonDetail: feed.absence_reason_detail,
         notifyParent: feed.notify_parent ?? false,
         isMakeup: feed.is_makeup ?? false,
         progressText: feed.progress_text,
-        memo: feed.memo,
-        feedValues: (values || []).map(v => ({
+        memoValues: (feed.memo_values as Record<string, string>) || {},
+        feedValues: values.map(v => ({
           setId: v.set_id,
           optionId: v.option_id,
           score: v.score,
-        })),
-        materials: (materials || []).map(m => ({
-          id: m.id,
-          materialName: m.material_name,
-          quantity: m.quantity,
         })),
       };
     }
@@ -280,7 +349,7 @@ export async function getSavedFeeds(
   }
 }
 
-// 이전 진도 조회 (placeholder용)
+// 이전 진도 조회 (placeholder용) - 단일 학생
 export async function getPreviousProgress(
   studentId: string,
   currentDate: string
@@ -289,7 +358,7 @@ export async function getPreviousProgress(
     const supabase = await createClient();
     
     const { data } = await supabase
-      .from('daily_feeds')
+      .from('student_feeds')
       .select('progress_text')
       .eq('student_id', studentId)
       .lt('feed_date', currentDate)
@@ -304,7 +373,44 @@ export async function getPreviousProgress(
   }
 }
 
-// 테넌트 설정 조회 (진도/교재 ON/OFF)
+// 이전 진도 일괄 조회 (최적화) - 여러 학생 한번에
+export async function getPreviousProgressBatch(
+  studentIds: string[],
+  currentDate: string
+): Promise<Record<string, string>> {
+  try {
+    if (studentIds.length === 0) return {};
+    
+    const supabase = await createClient();
+    
+    // 각 학생의 가장 최근 진도를 한번에 조회
+    // distinct on 대신 모든 이전 피드를 가져와서 JS에서 처리
+    const { data, error } = await supabase
+      .from('student_feeds')
+      .select('student_id, progress_text, feed_date')
+      .in('student_id', studentIds)
+      .lt('feed_date', currentDate)
+      .not('progress_text', 'is', null)
+      .order('feed_date', { ascending: false });
+    
+    if (error) throw error;
+    
+    // 학생별 가장 최근 진도만 추출
+    const result: Record<string, string> = {};
+    for (const row of data || []) {
+      if (!result[row.student_id] && row.progress_text) {
+        result[row.student_id] = row.progress_text;
+      }
+    }
+    
+    return result;
+  } catch (error) {
+    console.error('getPreviousProgressBatch error:', error);
+    return {};
+  }
+}
+
+// 테넌트 설정 조회 (진도/교재 ON/OFF + 보강 기본값)
 export async function getTenantSettings(): Promise<{
   success: boolean;
   data?: TenantSettings;
@@ -334,13 +440,20 @@ export async function getTenantSettings(): Promise<{
       .eq('id', profile.tenant_id)
       .single();
     
-    const settings = tenant?.settings as Record<string, boolean> || {};
+    const settings = tenant?.settings as Record<string, any> || {};
     
     return {
       success: true,
       data: {
         progress_enabled: settings.progress_enabled ?? false,
         materials_enabled: settings.materials_enabled ?? false,
+        makeup_defaults: settings.makeup_defaults ?? {
+          '병결': true,
+          '학교행사': true,
+          '가사': false,
+          '무단': false,
+          '기타': true,
+        },
       },
     };
   } catch (error) {
@@ -392,13 +505,12 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
     
     // 기존 피드 확인 (upsert용)
     const { data: existingFeed } = await supabase
-      .from('daily_feeds')
+      .from('student_feeds')
       .select('id')
       .eq('tenant_id', profile.tenant_id)
       .eq('class_id', payload.classId)
       .eq('student_id', payload.studentId)
       .eq('feed_date', payload.feedDate)
-      .is('deleted_at', null)
       .single();
     
     let feedId: string;
@@ -406,16 +518,16 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
     if (existingFeed) {
       // UPDATE
       const { error: updateError } = await supabase
-        .from('daily_feeds')
+        .from('student_feeds')
         .update({
           attendance_status: payload.attendanceStatus,
           absence_reason: payload.absenceReason,
           absence_reason_detail: payload.absenceReasonDetail,
           notify_parent: payload.notifyParent,
           is_makeup: payload.isMakeup,
+          needs_makeup: payload.needsMakeup ?? false,
           progress_text: payload.progressText,
-          memo: payload.memo,
-          status: 'saved',
+          memo_values: payload.memoValues || {},
           updated_at: new Date().toISOString(),
         })
         .eq('id', existingFeed.id);
@@ -423,72 +535,80 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
       if (updateError) throw updateError;
       feedId = existingFeed.id;
       
-      // 기존 값들 soft delete
+      // 기존 feed_values 삭제
       await supabase
-        .from('daily_feed_values')
-        .update({ deleted_at: new Date().toISOString() })
-        .eq('daily_feed_id', feedId);
+        .from('feed_values')
+        .delete()
+        .eq('feed_id', feedId);
       
-      await supabase
-        .from('daily_feed_materials')
-        .update({ deleted_at: new Date().toISOString() })
-        .eq('daily_feed_id', feedId);
+      // 보강 티켓 처리
+      await handleMakeupTicket(supabase, {
+        feedId,
+        tenantId: profile.tenant_id,
+        studentId: payload.studentId,
+        classId: payload.classId,
+        feedDate: payload.feedDate,
+        absenceReason: payload.absenceReason,
+        needsMakeup: payload.needsMakeup ?? false,
+        attendanceStatus: payload.attendanceStatus,
+      });
         
     } else {
       // INSERT
       const { data: newFeed, error: insertError } = await supabase
-        .from('daily_feeds')
+        .from('student_feeds')
         .insert({
           tenant_id: profile.tenant_id,
           class_id: payload.classId,
           student_id: payload.studentId,
-          teacher_id: user.id,
           feed_date: payload.feedDate,
           attendance_status: payload.attendanceStatus,
           absence_reason: payload.absenceReason,
           absence_reason_detail: payload.absenceReasonDetail,
           notify_parent: payload.notifyParent,
           is_makeup: payload.isMakeup,
+          needs_makeup: payload.needsMakeup ?? false,
           progress_text: payload.progressText,
-          memo: payload.memo,
-          status: 'saved',
-          idempotency_key: payload.idempotencyKey,
+          memo_values: payload.memoValues || {},
         })
         .select('id')
         .single();
       
       if (insertError) throw insertError;
       feedId = newFeed.id;
+      
+      // 보강 티켓 처리
+      await handleMakeupTicket(supabase, {
+        feedId,
+        tenantId: profile.tenant_id,
+        studentId: payload.studentId,
+        classId: payload.classId,
+        feedDate: payload.feedDate,
+        absenceReason: payload.absenceReason,
+        needsMakeup: payload.needsMakeup ?? false,
+        attendanceStatus: payload.attendanceStatus,
+      });
     }
     
     // 피드 값 저장 (결석이 아닐 때만)
-    if (payload.attendanceStatus === 'present' && payload.feedValues.length > 0) {
+    if (payload.attendanceStatus !== 'absent' && payload.feedValues && payload.feedValues.length > 0) {
       const valueInserts = payload.feedValues.map(v => ({
-        daily_feed_id: feedId,
+        feed_id: feedId,
         set_id: v.setId,
         option_id: v.optionId,
+        score: v.score ?? null,
       }));
+      
+      console.log('Inserting feed_values:', valueInserts);
       
       const { error: valuesError } = await supabase
-        .from('daily_feed_values')
+        .from('feed_values')
         .insert(valueInserts);
       
-      if (valuesError) throw valuesError;
-    }
-    
-    // 교재 사용 저장
-    if (payload.materials.length > 0) {
-      const materialInserts = payload.materials.map(m => ({
-        daily_feed_id: feedId,
-        material_name: m.materialName,
-        quantity: m.quantity,
-      }));
-      
-      const { error: materialsError } = await supabase
-        .from('daily_feed_materials')
-        .insert(materialInserts);
-      
-      if (materialsError) throw materialsError;
+      if (valuesError) {
+        console.error('feed_values insert error:', valuesError);
+        throw valuesError;
+      }
     }
     
     // Idempotency 키 저장

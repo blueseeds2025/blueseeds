@@ -325,25 +325,26 @@ export function useFeedData({
       if (set.is_scored) {
         const numberMatches = raw.match(/-?\d+/g);
         if (!numberMatches || numberMatches.length === 0) {
-          toast.error('점수를 입력해주세요 (예: 적극적 100)');
-          return;
-        }
+          // 점수 없으면 점수 제외 옵션으로 처리
+          score = null;
+          label = raw.trim();
+        } else {
+          const parsedScore = Number(numberMatches[numberMatches.length - 1]);
+          if (Number.isNaN(parsedScore)) {
+            toast.error('점수 형식이 올바르지 않습니다');
+            return;
+          }
 
-        const parsedScore = Number(numberMatches[numberMatches.length - 1]);
-        if (Number.isNaN(parsedScore)) {
-          toast.error('점수 형식이 올바르지 않습니다');
-          return;
-        }
+          score = parsedScore;
+          label = raw.replace(/-?\d+/g, '').trim();
+          if (!label) label = '선택지';
 
-        score = parsedScore;
-        label = raw.replace(/-?\d+/g, '').trim();
-        if (!label) label = '선택지';
-
-        if (set.score_step) {
-          const correctedScore = Math.round(score / set.score_step) * set.score_step;
-          if (correctedScore !== score) {
-            toast.info(`${score} → ${correctedScore}점 자동 보정`);
-            score = correctedScore;
+          if (set.score_step) {
+            const correctedScore = Math.round(score / set.score_step) * set.score_step;
+            if (correctedScore !== score) {
+              toast.info(`${score} → ${correctedScore}점 자동 보정`);
+              score = correctedScore;
+            }
           }
         }
       }
@@ -377,21 +378,28 @@ export function useFeedData({
       }));
 
       // 3. 서버 요청
+      const insertData: Record<string, unknown> = {
+        set_id: setId,
+        label,
+        display_order: maxOrder + 1,
+        is_active: true,
+        report_category: category,
+      };
+      
+      // score가 null이 아닐 때만 포함
+      if (score !== null) {
+        insertData.score = score;
+      }
+      
       const { data, error } = await supabase
         .from('feed_options')
-        .insert({
-          set_id: setId,
-          label,
-          score,
-          display_order: maxOrder + 1,
-          is_active: true,
-          report_category: category,
-        })
+        .insert(insertData)
         .select()
         .single();
 
       if (error) {
         // 4a. 실패시 임시 항목 제거
+        console.error('옵션 추가 실패:', error); // 에러 로그 추가
         toastSaveFail();
         setOptions((prev) => ({
           ...prev,
@@ -405,6 +413,11 @@ export function useFeedData({
         ...prev,
         [setId]: prev[setId].map((o) => (o.id === tempId ? (data as Option) : o)),
       }));
+      
+      // 점수 제외 옵션일 경우 안내 토스트
+      if (set.is_scored && score === null) {
+        toast.success(`"${label}" 추가됨 (점수 제외)`);
+      }
     },
     [categoryDraft, optionSets, options, supabase, toastSaveFail]
   );
@@ -705,8 +718,9 @@ export function useFeedData({
   /**
    * archiveAllCurrentSets - confirm 없이 바로 실행
    * confirm은 FeedSettingsClient에서 처리
+   * @param skipStateUpdate - true면 로컬 상태 업데이트 건너뜀 (applyTemplate에서 직접 처리)
    */
-  const archiveAllCurrentSets = useCallback(async (): Promise<boolean> => {
+  const archiveAllCurrentSets = useCallback(async (skipStateUpdate = false): Promise<boolean> => {
     if (optionSets.length === 0) return true;
 
     const ids = optionSets.map((s) => s.id);
@@ -730,10 +744,12 @@ export function useFeedData({
       return false;
     }
 
-    // ✅ 상태 직접 업데이트
-    setOptionSets([]);
-    setOptions({});
-    setExpandedSets(new Set());
+    // 상태 업데이트 (skipStateUpdate가 false일 때만)
+    if (!skipStateUpdate) {
+      setOptionSets([]);
+      setOptions({});
+      setExpandedSets(new Set());
+    }
 
     return true;
   }, [optionSets, setExpandedSets, supabase, toastSaveFail]);
@@ -743,12 +759,17 @@ export function useFeedData({
       try {
         const cfg = await ensureActiveConfig();
 
-        const okArchived = await archiveAllCurrentSets();
+        // skipStateUpdate=true: 상태 업데이트는 아래에서 한 번에 처리
+        const okArchived = await archiveAllCurrentSets(true);
         if (okArchived === false) return;
 
         if (templateKey === 'custom') {
           setCurrentTemplate(null);
           setWizardStep('scoring');
+          // custom은 여기서 상태 비움
+          setOptionSets([]);
+          setOptions({});
+          setExpandedSets(new Set());
           return;
         }
 
@@ -766,6 +787,11 @@ export function useFeedData({
         else setCurrentTemplate('general');
 
         const timestamp = Date.now();
+        
+        // 로컬 상태 업데이트용
+        const newSets: OptionSet[] = [];
+        const newOptions: Record<string, Option[]> = {};
+        const newCategoryDraft: Record<string, ReportCategory> = {};
 
         for (const setData of template.data!) {
           const { data: newSet, error: setError } = await supabase
@@ -789,32 +815,51 @@ export function useFeedData({
             return;
           }
 
+          const createdOptions: Option[] = [];
+          
           for (let i = 0; i < setData.options.length; i++) {
-            const { error: optError } = await supabase.from('feed_options').insert({
-              set_id: newSet.id,
-              label: setData.options[i].label,
-              score: setData.options[i].score,
-              display_order: i,
-              is_active: true,
-              report_category: setData.report_category ?? 'study',
-            });
+            const { data: newOpt, error: optError } = await supabase
+              .from('feed_options')
+              .insert({
+                set_id: newSet.id,
+                label: setData.options[i].label,
+                score: setData.options[i].score,
+                display_order: i,
+                is_active: true,
+                report_category: setData.report_category ?? 'study',
+              })
+              .select('*')
+              .single();
 
             if (optError) {
               toastSaveFail();
               return;
             }
+            
+            if (newOpt) {
+              createdOptions.push(newOpt as Option);
+            }
           }
+          
+          newSets.push(newSet as OptionSet);
+          newOptions[newSet.id] = createdOptions;
+          newCategoryDraft[newSet.id] = (setData.report_category ?? 'study') as ReportCategory;
         }
 
+        // 로컬 상태 직접 업데이트 (loadOptionSets 대신)
+        setOptionSets(newSets);
+        setOptions(newOptions);
+        setCategoryDraft(newCategoryDraft);
+        setExpandedSets(new Set());
+        
         toast.success('템플릿이 적용되었습니다');
         setShowWizard(false);
         setWizardStep('template');
-        await loadOptionSets(); // 템플릿 적용은 대량 변경이므로 유지
       } catch {
         toast.error('시스템 오류');
       }
     },
-    [archiveAllCurrentSets, ensureActiveConfig, getTenantId, loadOptionSets, supabase, toastSaveFail]
+    [archiveAllCurrentSets, ensureActiveConfig, getTenantId, setExpandedSets, supabase, toastSaveFail]
   );
 
   const setCustomTemplate = useCallback(

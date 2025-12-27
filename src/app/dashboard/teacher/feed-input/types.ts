@@ -77,6 +77,7 @@ export interface StudentCardData {
   absenceReason?: AbsenceReason;
   absenceReasonDetail?: string;  // 기타 선택 시
   notifyParent: boolean;
+  needsMakeup?: boolean;  // 보강 필요 여부
   
   // 진도 (ON/OFF 가능)
   progressText?: string;
@@ -115,16 +116,11 @@ export interface SavedFeedData {
   notifyParent: boolean;
   isMakeup: boolean;
   progressText?: string;
-  memo?: string;
+  memoValues: Record<string, string>;
   feedValues: {
     setId: string;
     optionId: string;
-    score?: number;
-  }[];
-  materials: {
-    id: string;
-    materialName: string;
-    quantity: number;
+    score?: number | null;
   }[];
 }
 
@@ -139,18 +135,15 @@ export interface SaveFeedPayload {
   absenceReasonDetail?: string;
   notifyParent: boolean;
   isMakeup: boolean;
+  needsMakeup?: boolean;  // 보강 필요 여부
   
   progressText?: string;
-  memo?: string;
+  memoValues?: Record<string, string>;
   
   feedValues: {
     setId: string;
     optionId: string;
-  }[];
-  
-  materials: {
-    materialName: string;
-    quantity: number;
+    score?: number | null;
   }[];
   
   idempotencyKey: string;
@@ -167,6 +160,7 @@ export interface SaveFeedResponse {
 export interface TenantSettings {
   progress_enabled: boolean;
   materials_enabled: boolean;
+  makeup_defaults?: Record<string, boolean>;  // 결석 사유별 보강 기본값
 }
 
 // 바텀시트 상태

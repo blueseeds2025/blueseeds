@@ -15,7 +15,7 @@ export const ABSENCE_REASONS: { value: AbsenceReason; label: string; autoNotify:
 
 // 출결 상태 옵션
 export const ATTENDANCE_OPTIONS = [
-  { value: 'present', label: '등원' },
+  { value: 'present', label: '출석' },
   { value: 'late', label: '지각' },
   { value: 'absent', label: '결석' },
 ] as const;

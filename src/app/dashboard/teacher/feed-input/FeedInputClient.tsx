@@ -147,7 +147,7 @@ export default function FeedInputClient({
   
   // 보강생 검색
   const [makeupSearch, setMakeupSearch] = useState('');
-  const [makeupResults, setMakeupResults] = useState<{ id: string; name: string; display_code: string }[]>([]);
+  const [makeupResults, setMakeupResults] = useState<{ id: string; name: string; display_code: string; hasPendingMakeup?: boolean }[]>([]);
   const [isSearchingMakeup, setIsSearchingMakeup] = useState(false);
   
   useEffect(() => {
@@ -165,6 +165,15 @@ export default function FeedInputClient({
           process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
         );
         
+        // 1. 보강 대기중인 학생 먼저 조회
+        const { data: pendingTickets } = await supabase
+          .from('makeup_tickets')
+          .select('student_id')
+          .eq('status', 'pending');
+        
+        const pendingStudentIds = new Set(pendingTickets?.map(t => t.student_id) || []);
+        
+        // 2. 학생 검색
         const { data } = await supabase
           .from('students')
           .select('id, name, display_code')
@@ -173,7 +182,19 @@ export default function FeedInputClient({
           .limit(10);
         
         const existingIds = students.map(s => s.id);
-        const filtered = (data || []).filter(s => !existingIds.includes(s.id));
+        const filtered = (data || [])
+          .filter(s => !existingIds.includes(s.id))
+          .map(s => ({
+            ...s,
+            hasPendingMakeup: pendingStudentIds.has(s.id),
+          }))
+          // 보강 필요 학생 먼저 정렬
+          .sort((a, b) => {
+            if (a.hasPendingMakeup && !b.hasPendingMakeup) return -1;
+            if (!a.hasPendingMakeup && b.hasPendingMakeup) return 1;
+            return 0;
+          });
+        
         setMakeupResults(filtered);
       } finally {
         setIsSearchingMakeup(false);
@@ -395,10 +416,17 @@ export default function FeedInputClient({
                         <li key={student.id}>
                           <button
                             onClick={() => addMakeupStudent(student)}
-                            className="w-full px-2 py-1.5 text-left hover:bg-[#FAF5FF] transition-colors text-sm"
+                            className={`w-full px-2 py-1.5 text-left hover:bg-[#FAF5FF] transition-colors text-sm ${
+                              student.hasPendingMakeup ? 'bg-[#FEF3C7]' : ''
+                            }`}
                           >
                             <span className="font-semibold text-[#1F2937]">{student.name}</span>
                             <span className="text-[#9CA3AF] ml-1.5 text-xs">{student.display_code}</span>
+                            {student.hasPendingMakeup && (
+                              <span className="ml-2 px-1.5 py-0.5 text-xs font-medium bg-[#F59E0B] text-white rounded">
+                                보강필요
+                              </span>
+                            )}
                           </button>
                         </li>
                       ))}

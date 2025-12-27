@@ -86,14 +86,39 @@ export default function FeedOptionPicker({
       e.preventDefault();
       onSelect(filteredOptions[0].id);
       onClose();
+      focusNextElement();
     } else if (e.key === 'Escape') {
       onClose();
+      anchorEl?.focus();
     }
   };
 
   const handleOptionClick = (optionId: string) => {
     onSelect(optionId);
     onClose();
+    focusNextElement();
+  };
+
+  // 다음 포커스 가능한 요소로 이동
+  const focusNextElement = () => {
+    if (!anchorEl) return;
+    
+    setTimeout(() => {
+      // 카드 내에서 포커스 가능한 모든 요소 찾기
+      const card = anchorEl.closest('[class*="rounded-xl"]');
+      if (!card) return;
+      
+      const focusableElements = card.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      
+      const currentIndex = Array.from(focusableElements).findIndex(el => el === anchorEl);
+      const nextElement = focusableElements[currentIndex + 1];
+      
+      if (nextElement) {
+        nextElement.focus();
+      }
+    }, 50);
   };
 
   if (!isOpen || !mounted) return null;

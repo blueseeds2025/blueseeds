@@ -87,39 +87,47 @@ export function ScoringWizardModal({ open, onBack, onSelectScoring }: ScoringWiz
   if (!open) return null;
 
   return (
-    <Card className={`${feedStyles.card.modal} border-[#6366F1]`}>
-      <CardHeader>
-        <CardTitle className="text-[#37352F]">평가 방식을 선택해주세요</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className={feedStyles.layout.scoringGrid}>
-          <Button 
-            variant="outline" 
-            className="h-16 border-[#E8E5E0] hover:border-[#6366F1] hover:bg-[#EEF2FF] text-[#37352F] font-medium"
-            onClick={() => onSelectScoring('precise')}
-          >
-            5점 단위
-          </Button>
-          <Button 
-            variant="outline" 
-            className="h-16 border-[#E8E5E0] hover:border-[#6366F1] hover:bg-[#EEF2FF] text-[#37352F] font-medium"
-            onClick={() => onSelectScoring('general')}
-          >
-            10점 단위
-          </Button>
-          <Button 
-            variant="outline" 
-            className="h-16 border-[#E8E5E0] hover:border-[#6366F1] hover:bg-[#EEF2FF] text-[#37352F] font-medium"
-            onClick={() => onSelectScoring('text')}
-          >
-            문장형
-          </Button>
-        </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      {/* 배경 오버레이 */}
+      <div 
+        className="absolute inset-0 bg-black/50" 
+        onClick={onBack}
+      />
+      {/* 모달 콘텐츠 */}
+      <Card className="relative z-10 w-full max-w-lg mx-4 border-[#6366F1] shadow-xl">
+        <CardHeader>
+          <CardTitle className="text-[#37352F]">평가 방식을 선택해주세요</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className={feedStyles.layout.scoringGrid}>
+            <Button 
+              variant="outline" 
+              className="h-16 border-[#E8E5E0] hover:border-[#6366F1] hover:bg-[#EEF2FF] text-[#37352F] font-medium"
+              onClick={() => onSelectScoring('precise')}
+            >
+              5점 단위
+            </Button>
+            <Button 
+              variant="outline" 
+              className="h-16 border-[#E8E5E0] hover:border-[#6366F1] hover:bg-[#EEF2FF] text-[#37352F] font-medium"
+              onClick={() => onSelectScoring('general')}
+            >
+              10점 단위
+            </Button>
+            <Button 
+              variant="outline" 
+              className="h-16 border-[#E8E5E0] hover:border-[#6366F1] hover:bg-[#EEF2FF] text-[#37352F] font-medium"
+              onClick={() => onSelectScoring('text')}
+            >
+              문장형
+            </Button>
+          </div>
 
-        <Button variant="ghost" className="w-full mt-4" onClick={onBack}>
-          뒤로
-        </Button>
-      </CardContent>
-    </Card>
+          <Button variant="ghost" className="w-full mt-4" onClick={onBack}>
+            뒤로
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

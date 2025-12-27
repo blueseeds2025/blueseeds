@@ -23,7 +23,7 @@ import type { ReportCategory } from '@/types/feed-settings';
 import { DRAG_ACTIVATION_DISTANCE } from './feedSettings.constants';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 import { toast } from 'sonner';
 
@@ -165,6 +165,7 @@ export default function FeedSettingsClient() {
   const [optionDraft, setOptionDraft] = useState<Record<string, string>>({});
   const [editingSetId, setEditingSetId] = useState<string | null>(null);
   const [editingSetName, setEditingSetName] = useState('');
+  const [newlyCreatedSetId, setNewlyCreatedSetId] = useState<string | null>(null); // 방금 생성된 세트 ID
 
   // Add item form state
   const [isAddingItem, setIsAddingItem] = useState(false);
@@ -351,6 +352,12 @@ export default function FeedSettingsClient() {
       setNewItemName('');
       setNewItemCategory(null);
       setIsAddingItem(false);
+      setNewlyCreatedSetId(created.id); // 새로 생성된 세트 ID 저장
+      
+      // 새로 만든 카드로 스크롤
+      setTimeout(() => {
+        document.getElementById(`option-set-${created.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
     }
   }, [addItemWithTemplate, currentTemplate, newItemCategory, newItemName]);
 
@@ -452,20 +459,9 @@ export default function FeedSettingsClient() {
     );
   }
 
-  // 데이터가 없으면 템플릿 선택 화면만 표시
-  if (optionSets.length === 0 && !showWizard) {
-    return (
-      <>
-        <EmptyState onSelectTemplate={handleEmptyTemplateSelect} />
-        
-        {/* Scoring 선택 모달 (직접 만들기 선택시) */}
-        <ScoringWizardModal
-          open={showWizard && wizardStep === 'scoring'}
-          onBack={() => setShowWizard(false)}
-          onSelectScoring={(key) => void setCustomTemplate(key)}
-        />
-      </>
-    );
+  // 데이터가 없고, 위저드도 안 보이고, 템플릿도 선택 안 됐으면 EmptyState
+  if (optionSets.length === 0 && !showWizard && !currentTemplate) {
+    return <EmptyState onSelectTemplate={handleEmptyTemplateSelect} />;
   }
 
   // 데이터가 있거나 위저드 진행중이면 기존 UI
@@ -473,7 +469,7 @@ export default function FeedSettingsClient() {
     <div className={feedStyles.layout.page}>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        {/* 좌측: 제목 + 모드 배지 + AI 스위치 */}
+        {/* 좌측: 제목 + 모드 배지 */}
         <div className="flex items-center gap-3">
           <h1 className={feedStyles.text.pageTitle}>피드 설정</h1>
           {currentTemplate && (
@@ -485,14 +481,6 @@ export default function FeedSettingsClient() {
                 : '10점 단위'}
             </span>
           )}
-          <div className="flex items-center gap-2 text-sm text-gray-600 ml-2">
-            <span>AI 매핑</span>
-            <Switch 
-              checked={isEditMode} 
-              onCheckedChange={(v) => setIsEditMode(Boolean(v))}
-              className="data-[state=checked]:bg-[#6366F1]"
-            />
-          </div>
         </div>
 
         {/* 우측: 설정 관리 버튼들 */}
@@ -526,101 +514,76 @@ export default function FeedSettingsClient() {
           </Button>
         </div>
       </div>
-{/* 기본 항목 설정 */}
-      <BasicSettingsSection 
-        supabase={supabase} 
-        getTenantId={getTenantId} 
-      />
-      {isEditMode && (
-        <div className={feedStyles.layout.editModeHint}>
-          <Info className={feedStyles.icon.small} />
-          각 평가항목의 AI 리포트 영역(학습/태도/출결/없음)을 변경할 수 있습니다.
-        </div>
-      )}
+{/* 평가항목 섹션 */}
+      <Card id="feed-option-section" className="mb-6 border-[#E8E5E0]">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base font-semibold text-[#37352F]">
+                평가항목
+              </CardTitle>
+              <p className="text-sm text-[#9B9A97] mt-1">
+                학생 피드에 기록할 평가항목을 설정하세요
+              </p>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-gray-600">
+              <span>AI 매핑</span>
+              <Switch 
+                checked={isEditMode} 
+                onCheckedChange={(v) => setIsEditMode(Boolean(v))}
+                className="data-[state=checked]:bg-[#6366F1]"
+              />
+            </div>
+          </div>
+          {isEditMode && (
+            <div className="mt-3 flex items-center gap-2 text-sm text-[#9B9A97]">
+              <Info className={feedStyles.icon.small} />
+              각 평가항목의 AI 리포트 영역(학습/태도/출결/없음)을 변경할 수 있습니다.
+            </div>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* 평가항목 추가 버튼 */}
+          <Button
+            onClick={() => {
+              setIsAddingItem(true);
+              setShowWizard(false);
+            }}
+            variant="outline"
+            className="w-full border border-[#D4D1CC] bg-[#F7F6F3] text-[#5F5E5C] hover:text-[#6366F1] hover:border-[#6366F1] hover:bg-[#EEF2FF]/50"
+          >
+            <Plus className={feedStyles.icon.buttonIcon} />
+            평가항목 추가
+          </Button>
 
-      {/* 평가항목 추가 버튼 */}
-      <div className="mb-4">
-        <Button
-          onClick={() => {
-            setIsAddingItem(true);
-            setShowWizard(false);
-          }}
-          className="flex items-center gap-2 px-5 py-3 rounded-lg bg-[#6366F1] hover:bg-[#4F46E5] text-white font-medium shadow-sm transition-all"
-        >
-          <Plus className={feedStyles.icon.buttonIcon} />
-          평가항목 추가
-        </Button>
-      </div>
+          {/* Last applied preset */}
+          {lastAppliedPresetName && (
+            <div className="text-xs text-[#9B9A97]">
+              현재 적용된 기본형: <span className="font-medium text-[#37352F]">{lastAppliedPresetName}</span>
+            </div>
+          )}
 
-      {/* Last applied preset */}
-      {lastAppliedPresetName && (
-        <div className={feedStyles.layout.presetLabel}>
-          현재 적용된 기본형: <span className={feedStyles.text.definitionLabel}>{lastAppliedPresetName}</span>
-        </div>
-      )}
+          {/* Add item form */}
+          {isAddingItem && (
+            <AddItemForm
+              currentTemplate={currentTemplate}
+              newItemName={newItemName}
+              newItemCategory={newItemCategory}
+              onChangeName={setNewItemName}
+              onChangeCategory={setNewItemCategory}
+              onSubmit={() => void addNewItem()}
+              onCancel={handleCancelAddItem}
+            />
+          )}
 
-      {/* Modals */}
-      <TemplateSelectModal
-        open={showTemplateModal}
-        pendingItemName={pendingItemName}
-        onSelectPrecise={() => void handleTemplateSelect('precise')}
-        onSelectGeneral={() => void handleTemplateSelect('general')}
-        onSelectText={() => void handleTemplateSelect('text')}
-        onClose={() => {
-          setShowTemplateModal(false);
-          setPendingItemName('');
-        }}
-      />
-
-      <PresetSaveModal
-        open={showPresetModal}
-        presetName={presetName}
-        isSaving={isSaving}
-        onChangeName={(v) => setPresetName(v)}
-        onConfirm={() => void confirmSavePreset()}
-        onClose={() => {
-          setShowPresetModal(false);
-          setPresetName('');
-        }}
-      />
-
-      <PresetListModal
-        open={showPresetListModal}
-        onClose={() => setShowPresetListModal(false)}
-        presets={presetList}
-        applyingPresetId={applyingPresetId}
-        deletingPresetId={deletingPresetId}
-        onApply={(id, name) => void handleApplyPreset(id, name)}
-        onDelete={(id, name) => void handleDeletePreset(id, name)}
-      />
-
-      {/* Scoring 선택 모달 */}
-      <ScoringWizardModal
-        open={showWizard && wizardStep === 'scoring'}
-        onBack={() => setShowWizard(false)}
-        onSelectScoring={(key) => void setCustomTemplate(key)}
-      />
-
-      {/* Add item form */}
-      {isAddingItem && (
-        <AddItemForm
-          currentTemplate={currentTemplate}
-          newItemName={newItemName}
-          newItemCategory={newItemCategory}
-          onChangeName={setNewItemName}
-          onChangeCategory={setNewItemCategory}
-          onSubmit={() => void addNewItem()}
-          onCancel={handleCancelAddItem}
-        />
-      )}
-
-      {/* Option Sets */}
+          {/* Option Sets */}
       {optionSets.map((set) => (
         <OptionSetCard
           key={set.id}
           set={set}
           expanded={expandedSets.has(set.id)}
           isEditMode={isEditMode}
+          isHighlightAdd={newlyCreatedSetId === set.id}
           categoryValue={
             (categoryDraft[set.id] ?? set.default_report_category ?? 'study') as ReportCategory
           }
@@ -665,10 +628,68 @@ export default function FeedSettingsClient() {
               // ✅ 입력창 먼저 비우고, 서버 요청은 비동기로
               setOptionDraft((prev) => ({ ...prev, [set.id]: '' }));
               void addOptionFromInput(set.id, draft);
+              
+              // 옵션 추가하면 강조 해제
+              if (newlyCreatedSetId === set.id) {
+                setNewlyCreatedSetId(null);
+              }
             },
           }}
         />
       ))}
+        </CardContent>
+      </Card>
+
+      {/* 기본 항목 설정 */}
+      <BasicSettingsSection 
+        supabase={supabase} 
+        getTenantId={getTenantId} 
+      />
+
+      {/* Modals */}
+      <TemplateSelectModal
+        open={showTemplateModal}
+        pendingItemName={pendingItemName}
+        onSelectPrecise={() => void handleTemplateSelect('precise')}
+        onSelectGeneral={() => void handleTemplateSelect('general')}
+        onSelectText={() => void handleTemplateSelect('text')}
+        onClose={() => {
+          setShowTemplateModal(false);
+          setPendingItemName('');
+        }}
+      />
+
+      <PresetSaveModal
+        open={showPresetModal}
+        presetName={presetName}
+        isSaving={isSaving}
+        onChangeName={(v) => setPresetName(v)}
+        onConfirm={() => void confirmSavePreset()}
+        onClose={() => {
+          setShowPresetModal(false);
+          setPresetName('');
+        }}
+      />
+
+      <PresetListModal
+        open={showPresetListModal}
+        onClose={() => setShowPresetListModal(false)}
+        presets={presetList}
+        applyingPresetId={applyingPresetId}
+        deletingPresetId={deletingPresetId}
+        onApply={(id, name) => void handleApplyPreset(id, name)}
+        onDelete={(id, name) => void handleDeletePreset(id, name)}
+      />
+
+      {/* Scoring 선택 모달 */}
+      <ScoringWizardModal
+        open={showWizard && wizardStep === 'scoring'}
+        onBack={() => setShowWizard(false)}
+        onSelectScoring={(key) => {
+          void setCustomTemplate(key);
+          setIsAddingItem(true); // 자동으로 평가항목 추가 폼 열기
+        }}
+      />
 
       {/* Confirm Dialog */}
       <ConfirmDialog />

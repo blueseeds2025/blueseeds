@@ -33,10 +33,13 @@ interface StudentCardProps {
   onOpenOptionPicker: (studentId: string, setId: string, anchorEl: HTMLElement) => void;
   onAttendanceChange: (studentId: string, status: AttendanceStatus, reason?: AbsenceReason, detail?: string) => void;
   onNotifyParentChange: (studentId: string, notify: boolean) => void;
+  onNeedsMakeupChange: (studentId: string, needsMakeup: boolean) => void;
   onProgressChange: (studentId: string, progress: string) => void;
   onMemoChange: (studentId: string, fieldId: string, value: string) => void;
   onSave: (studentId: string) => Promise<void>;
+  onSendNotify?: (studentId: string) => Promise<void>;
   isSaving: boolean;
+  isSendingNotify?: boolean;
 }
 
 export default function StudentCard({
@@ -47,10 +50,13 @@ export default function StudentCard({
   onOpenOptionPicker,
   onAttendanceChange,
   onNotifyParentChange,
+  onNeedsMakeupChange,
   onProgressChange,
   onMemoChange,
   onSave,
+  onSendNotify,
   isSaving,
+  isSendingNotify,
 }: StudentCardProps) {
   const [showAbsenceConfirm, setShowAbsenceConfirm] = useState(false);
   const [reasonDetail, setReasonDetail] = useState(data.absenceReasonDetail || '');
@@ -182,16 +188,26 @@ export default function StudentCard({
           {/* 지각 - 학부모 알림 */}
           {isLate && (
             <div className="p-3 bg-[#FFFBEB] rounded-lg border border-[#FCD34D]">
-              <label className="flex items-center gap-2 text-xs text-[#92400E]">
-                <input
-                  type="checkbox"
-                  checked={data.notifyParent}
-                  onChange={(e) => onNotifyParentChange(data.studentId, e.target.checked)}
-                  className="rounded border-[#FCD34D] text-[#F59E0B]"
-                />
-                <span className="font-medium">학부모 알림</span>
-                <span className="text-[#B45309]">(자동)</span>
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 text-xs text-[#92400E]">
+                  <input
+                    type="checkbox"
+                    checked={data.notifyParent}
+                    onChange={(e) => onNotifyParentChange(data.studentId, e.target.checked)}
+                    className="rounded border-[#FCD34D] text-[#F59E0B]"
+                  />
+                  <span className="font-medium">학부모 알림</span>
+                </label>
+                {data.notifyParent && onSendNotify && (
+                  <button
+                    onClick={() => onSendNotify(data.studentId)}
+                    disabled={isSendingNotify}
+                    className="px-3 py-1 bg-[#F59E0B] hover:bg-[#D97706] text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {isSendingNotify ? '전송중...' : '보내기'}
+                  </button>
+                )}
+              </div>
             </div>
           )}
           
@@ -225,18 +241,44 @@ export default function StudentCard({
                 />
               )}
               
-              <label className="flex items-center gap-2 mt-2 text-xs text-[#6B7280]">
-                <input
-                  type="checkbox"
-                  checked={data.notifyParent}
-                  onChange={(e) => onNotifyParentChange(data.studentId, e.target.checked)}
-                  className="rounded border-[#D1D5DB] text-[#6366F1]"
-                />
-                <span>학부모 알림</span>
-                {data.absenceReason === '무단' && (
-                  <span className="text-[#F59E0B] font-semibold">(자동)</span>
+              <div className="flex items-center justify-between mt-2">
+                <label className="flex items-center gap-2 text-xs text-[#6B7280]">
+                  <input
+                    type="checkbox"
+                    checked={data.notifyParent}
+                    onChange={(e) => onNotifyParentChange(data.studentId, e.target.checked)}
+                    className="rounded border-[#D1D5DB] text-[#6366F1]"
+                  />
+                  <span>학부모 알림</span>
+                  {data.absenceReason === '무단' && (
+                    <span className="text-[#F59E0B] font-semibold">(자동)</span>
+                  )}
+                </label>
+                {data.notifyParent && onSendNotify && (
+                  <button
+                    onClick={() => onSendNotify(data.studentId)}
+                    disabled={isSendingNotify}
+                    className="px-3 py-1 bg-[#DC2626] hover:bg-[#B91C1C] text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {isSendingNotify ? '전송중...' : '보내기'}
+                  </button>
                 )}
-              </label>
+              </div>
+              
+              {/* 보강 필요 체크박스 - 사유 선택 후에만 노출 */}
+              {data.absenceReason && (
+                <div className="flex items-center mt-2 pt-2 border-t border-[#FECACA]">
+                  <label className="flex items-center gap-2 text-xs text-[#6B7280]">
+                    <input
+                      type="checkbox"
+                      checked={data.needsMakeup ?? false}
+                      onChange={(e) => onNeedsMakeupChange(data.studentId, e.target.checked)}
+                      className="rounded border-[#D1D5DB] text-[#7C3AED]"
+                    />
+                    <span className="font-medium text-[#7C3AED]">보강 필요</span>
+                  </label>
+                </div>
+              )}
             </div>
           )}
           
@@ -262,7 +304,7 @@ export default function StudentCard({
           {/* 피드 항목 - 등원/지각일 때만 */}
           {!isAbsent && optionSets.length > 0 && (
             <div className="grid grid-cols-2 gap-2">
-              {optionSets.map(set => {
+              {optionSets.map((set, index) => {
                 const isEmpty = !data.feedValues[set.id];
                 return (
                   <div key={set.id}>
@@ -270,10 +312,20 @@ export default function StudentCard({
                       {set.name}<span className="text-[#EF4444]">*</span>
                     </label>
                     <button
-                      onClick={(e) => onOpenOptionPicker(data.studentId, set.id, e.currentTarget)}
+                      type="button"
+                      tabIndex={0}
+                      onFocus={(e) => {
+                        onOpenOptionPicker(data.studentId, set.id, e.currentTarget);
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onOpenOptionPicker(data.studentId, set.id, e.currentTarget);
+                      }}
                       className={`
                         w-full px-3 py-2 border rounded-lg text-sm text-left font-medium
                         transition-colors hover:opacity-80
+                        focus:outline-none focus:ring-2 focus:ring-[#6366F1] focus:ring-offset-1
                         ${isEmpty
                           ? 'border-[#FECACA] bg-[#FEF2F2] text-[#DC2626]'
                           : 'border-[#6EE7B7] bg-[#D1FAE5] text-[#059669]'
@@ -313,9 +365,16 @@ export default function StudentCard({
         <div className="px-3 pb-3">
           <button
             onClick={handleSaveClick}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !isSaveDisabled) {
+                e.preventDefault();
+                handleSaveClick();
+              }
+            }}
             disabled={isSaveDisabled}
             className={`
               w-full py-2.5 rounded-lg text-sm font-semibold transition-all
+              focus:outline-none focus:ring-2 focus:ring-[#6366F1] focus:ring-offset-1
               ${getSaveButtonStyle()}
               disabled:opacity-50 disabled:cursor-not-allowed
             `}

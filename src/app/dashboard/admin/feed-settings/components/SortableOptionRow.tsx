@@ -61,19 +61,20 @@ export default function SortableOptionRow({ option, isScored, onDelete, onUpdate
       // 숫자 추출 (옵션 추가와 동일한 로직)
       const numberMatches = raw.match(/-?\d+/g);
       if (!numberMatches || numberMatches.length === 0) {
-        toast.error('점수를 입력해주세요 (예: 적극적 100)');
-        return;
-      }
+        // 점수 없으면 점수 제외로 처리
+        score = null;
+        label = raw.trim();
+      } else {
+        const parsedScore = Number(numberMatches[numberMatches.length - 1]);
+        if (Number.isNaN(parsedScore)) {
+          toast.error('점수 형식이 올바르지 않습니다');
+          return;
+        }
 
-      const parsedScore = Number(numberMatches[numberMatches.length - 1]);
-      if (Number.isNaN(parsedScore)) {
-        toast.error('점수 형식이 올바르지 않습니다');
-        return;
+        score = parsedScore;
+        label = raw.replace(/-?\d+/g, '').trim();
+        if (!label) label = '선택지';
       }
-
-      score = parsedScore;
-      label = raw.replace(/-?\d+/g, '').trim();
-      if (!label) label = '선택지';
     }
 
     void onUpdate(option.id, label, score);
@@ -115,9 +116,15 @@ export default function SortableOptionRow({ option, isScored, onDelete, onUpdate
           <span className="flex-1 font-medium">{option.label}</span>
 
           {isScored && (
-            <span className={feedStyles.badge.blue}>
-              {option.score}점
-            </span>
+            option.score !== null ? (
+              <span className={feedStyles.badge.blue}>
+                {option.score}점
+              </span>
+            ) : (
+              <span className="text-xs px-2.5 py-1 bg-gray-100 text-gray-500 rounded-full">
+                점수 제외
+              </span>
+            )
           )}
 
           <Button

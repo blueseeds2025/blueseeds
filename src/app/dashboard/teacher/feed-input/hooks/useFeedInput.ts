@@ -20,7 +20,7 @@ import {
   getClassStudents,
   getFeedOptionSets,
   getSavedFeeds,
-  getPreviousProgress,
+  getPreviousProgressBatch,
   getTenantSettings,
   saveFeed,
   saveAllFeeds,
@@ -33,12 +33,14 @@ import {
 } from '../constants';
 import { toast } from 'sonner';
 
-export function useFeedInput() {
-  // 기본 상태
-  const [classes, setClasses] = useState<ClassInfo[]>([]);
-  const [selectedClassId, setSelectedClassId] = useState<string>('');
-  const [selectedDate, setSelectedDate] = useState<string>(formatDate(new Date()));
-  
+interface UseFeedInputProps {
+  classId: string;
+  date: string;
+  teacherId: string;
+  tenantId: string;
+}
+
+export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInputProps) {
   // 학생 및 피드 데이터
   const [students, setStudents] = useState<ClassStudent[]>([]);
   const [cardDataMap, setCardDataMap] = useState<Record<string, StudentCardData>>({});
@@ -46,6 +48,13 @@ export function useFeedInput() {
   const [tenantSettings, setTenantSettings] = useState<TenantSettings>({
     progress_enabled: false,
     materials_enabled: false,
+    makeup_defaults: {
+      '병결': true,
+      '학교행사': true,
+      '가사': false,
+      '무단': false,
+      '기타': true,
+    },
   });
   
   // 바텀시트 상태
@@ -131,33 +140,25 @@ export function useFeedInput() {
   // 초기 데이터 로드
   // ============================================================================
   
-  // 반 목록 로드
-  useEffect(() => {
-    async function loadClasses() {
-      const result = await getTeacherClasses();
-      if (result.success && result.data) {
-        setClasses(result.data);
-        if (result.data.length > 0 && !selectedClassId) {
-          setSelectedClassId(result.data[0].id);
-        }
-      }
-    }
-    loadClasses();
-  }, []);
-  
   // 옵션 세트 및 테넌트 설정 로드
   useEffect(() => {
+    console.log('=== loadSettings useEffect 시작 ===');
     async function loadSettings() {
+      console.log('loadSettings 함수 실행');
       const [optionsResult, settingsResult] = await Promise.all([
         getFeedOptionSets(),
         getTenantSettings(),
       ]);
+      
+      console.log('optionsResult:', optionsResult);
+      console.log('settingsResult:', settingsResult);
       
       if (optionsResult.success && optionsResult.data) {
         setOptionSets(optionsResult.data);
       }
       
       if (settingsResult.success && settingsResult.data) {
+        console.log('setTenantSettings 호출:', settingsResult.data);
         setTenantSettings(settingsResult.data);
       }
     }
@@ -166,36 +167,39 @@ export function useFeedInput() {
   
   // 반/날짜 변경 시 학생 및 피드 데이터 로드
   useEffect(() => {
-    if (!selectedClassId) return;
+    if (!classId) return;
     
     async function loadStudentsAndFeeds() {
       setIsLoading(true);
       
       try {
-        // 학생 목록 로드
-        const studentsResult = await getClassStudents(selectedClassId);
+        // 학생 목록 + 피드 데이터 동시 로드
+        const [studentsResult, feedsResult] = await Promise.all([
+          getClassStudents(classId),
+          getSavedFeeds(classId, date),
+        ]);
+        
         if (!studentsResult.success || !studentsResult.data) {
           toast.error('학생 목록을 불러오는데 실패했습니다');
           return;
         }
         
         setStudents(studentsResult.data);
-        
-        // 저장된 피드 데이터 로드
-        const feedsResult = await getSavedFeeds(selectedClassId, selectedDate);
         const savedFeeds = feedsResult.data || {};
+        
+        // 이전 진도 일괄 조회 (progress_enabled일 때만)
+        let previousProgressMap: Record<string, string> = {};
+        if (tenantSettings.progress_enabled && studentsResult.data.length > 0) {
+          const studentIds = studentsResult.data.map(s => s.id);
+          previousProgressMap = await getPreviousProgressBatch(studentIds, date);
+        }
         
         // 카드 데이터 초기화
         const newCardDataMap: Record<string, StudentCardData> = {};
         
         for (const student of studentsResult.data) {
           const saved = savedFeeds[student.id];
-          
-          // 이전 진도 로드 (progress_enabled일 때만)
-          let previousProgress: string | undefined;
-          if (tenantSettings.progress_enabled) {
-            previousProgress = await getPreviousProgress(student.id, selectedDate) || undefined;
-          }
+          const previousProgress = previousProgressMap[student.id];
           
           newCardDataMap[student.id] = createCardData(
             student,
@@ -212,7 +216,7 @@ export function useFeedInput() {
     }
     
     loadStudentsAndFeeds();
-  }, [selectedClassId, selectedDate, optionSets, tenantSettings.progress_enabled]);
+  }, [classId, date, optionSets, tenantSettings.progress_enabled]);
   
   // 페이지 이탈 방지
   useEffect(() => {
@@ -246,9 +250,7 @@ export function useFeedInput() {
     });
     
     // 메모 값 초기화 (기본: 특이사항)
-    const memoValues: Record<string, string> = {
-      'default': saved?.memo || '',
-    };
+    const memoValues: Record<string, string> = saved?.memoValues || { 'default': '' };
     
     const hasSaved = !!saved;
     const status: CardStatus = hasSaved ? 'saved' : 'empty';
@@ -265,7 +267,7 @@ export function useFeedInput() {
       previousProgress,
       feedValues,
       memoValues,
-      materials: saved?.materials || [],
+      materials: [],
       status,
       isDirty: false,
       savedData: saved,
@@ -329,17 +331,31 @@ export function useFeedInput() {
     reason?: AbsenceReason,
     detail?: string
   ) => {
+    // 결석 사유별 보강 기본값 가져오기
+    console.log('makeup_defaults:', tenantSettings.makeup_defaults);
+    console.log('reason:', reason);
+    const makeupDefault = status === 'absent' && reason 
+      ? tenantSettings.makeup_defaults?.[reason] ?? true  // 설정 없으면 기본 true
+      : false;
+    console.log('makeupDefault:', makeupDefault);
+    
     updateCardData(studentId, {
       attendanceStatus: status,
       absenceReason: status === 'absent' ? reason : undefined,
       absenceReasonDetail: status === 'absent' && reason === '기타' ? detail : undefined,
       notifyParent: status === 'absent' && (reason === '무단' || reason === '지각'),
+      needsMakeup: status === 'absent' ? makeupDefault : false,
     });
-  }, [updateCardData]);
+  }, [updateCardData, tenantSettings.makeup_defaults]);
   
   // 학부모 알림 변경
   const handleNotifyParentChange = useCallback((studentId: string, notify: boolean) => {
     updateCardData(studentId, { notifyParent: notify });
+  }, [updateCardData]);
+  
+  // 보강 필요 변경
+  const handleNeedsMakeupChange = useCallback((studentId: string, needsMakeup: boolean) => {
+    updateCardData(studentId, { needsMakeup });
   }, [updateCardData]);
   
   // 진도 변경
@@ -436,35 +452,23 @@ export function useFeedInput() {
     setSavingStudentId(studentId);
     
     try {
-      // 메모 값들을 하나의 문자열로 합침 (구분자 사용)
-      const memoText = Object.entries(cardData.memoValues)
-        .filter(([_, value]) => value.trim())
-        .map(([fieldId, value]) => {
-          const field = memoFields.find(f => f.id === fieldId);
-          return `[${field?.name || fieldId}] ${value}`;
-        })
-        .join('\n');
-      
       const payload: SaveFeedPayload = {
         studentId,
-        classId: selectedClassId,
-        feedDate: selectedDate,
+        classId: classId,
+        feedDate: date,
         attendanceStatus: cardData.attendanceStatus,
         absenceReason: cardData.absenceReason,
         absenceReasonDetail: cardData.absenceReasonDetail,
         notifyParent: cardData.notifyParent,
         isMakeup: cardData.isMakeup,
-        progressText: cardData.attendanceStatus === 'present' ? cardData.progressText : undefined,
-        memo: memoText || undefined,
-        feedValues: cardData.attendanceStatus === 'present'
+        needsMakeup: cardData.needsMakeup ?? false,
+        progressText: cardData.attendanceStatus !== 'absent' ? cardData.progressText : undefined,
+        memoValues: cardData.memoValues,
+        feedValues: cardData.attendanceStatus !== 'absent'
           ? Object.entries(cardData.feedValues)
               .filter(([_, optionId]) => optionId)
               .map(([setId, optionId]) => ({ setId, optionId: optionId! }))
           : [],
-        materials: cardData.materials.map(m => ({
-          materialName: m.materialName,
-          quantity: m.quantity,
-        })),
         idempotencyKey: generateIdempotencyKey(),
       };
       
@@ -488,11 +492,10 @@ export function useFeedInput() {
               notifyParent: cardData.notifyParent,
               isMakeup: cardData.isMakeup,
               progressText: cardData.progressText,
-              memo: cardData.memoValues['default'] || '',
+              memoValues: cardData.memoValues,
               feedValues: Object.entries(cardData.feedValues)
                 .filter(([_, optionId]) => optionId)
                 .map(([setId, optionId]) => ({ setId, optionId: optionId! })),
-              materials: cardData.materials,
             },
           },
         }));
@@ -502,7 +505,7 @@ export function useFeedInput() {
     } finally {
       setSavingStudentId(null);
     }
-  }, [cardDataMap, selectedClassId, selectedDate]);
+  }, [cardDataMap, classId, date]);
   
   // 전체 저장
   const handleSaveAll = useCallback(async () => {
@@ -525,35 +528,23 @@ export function useFeedInput() {
     
     try {
       const payloads: SaveFeedPayload[] = dirtyCards.map(cardData => {
-        // 메모 값들을 하나의 문자열로 합침
-        const memoText = Object.entries(cardData.memoValues)
-          .filter(([_, value]) => value.trim())
-          .map(([fieldId, value]) => {
-            const field = memoFields.find(f => f.id === fieldId);
-            return `[${field?.name || fieldId}] ${value}`;
-          })
-          .join('\n');
-        
         return {
           studentId: cardData.studentId,
-          classId: selectedClassId,
-          feedDate: selectedDate,
+          classId: classId,
+          feedDate: date,
           attendanceStatus: cardData.attendanceStatus,
           absenceReason: cardData.absenceReason,
           absenceReasonDetail: cardData.absenceReasonDetail,
           notifyParent: cardData.notifyParent,
           isMakeup: cardData.isMakeup,
-          progressText: cardData.attendanceStatus === 'present' ? cardData.progressText : undefined,
-          memo: memoText || undefined,
-          feedValues: cardData.attendanceStatus === 'present'
+          needsMakeup: cardData.needsMakeup ?? false,
+          progressText: cardData.attendanceStatus !== 'absent' ? cardData.progressText : undefined,
+          memoValues: cardData.memoValues,
+          feedValues: cardData.attendanceStatus !== 'absent'
             ? Object.entries(cardData.feedValues)
                 .filter(([_, optionId]) => optionId)
                 .map(([setId, optionId]) => ({ setId, optionId: optionId! }))
             : [],
-          materials: cardData.materials.map(m => ({
-            materialName: m.materialName,
-            quantity: m.quantity,
-          })),
           idempotencyKey: generateIdempotencyKey(),
         };
       });
@@ -586,7 +577,7 @@ export function useFeedInput() {
     } finally {
       setIsSaving(false);
     }
-  }, [cardDataMap, selectedClassId, selectedDate]);
+  }, [cardDataMap, classId, date]);
   
   // ============================================================================
   // 보강생 검색/추가
@@ -600,7 +591,7 @@ export function useFeedInput() {
     
     const timeout = setTimeout(async () => {
       setIsSearchingMakeup(true);
-      const result = await searchMakeupStudents(selectedClassId, makeupSearch);
+      const result = await searchMakeupStudents(classId, makeupSearch);
       if (result.success && result.data) {
         setMakeupResults(result.data);
       }
@@ -608,7 +599,7 @@ export function useFeedInput() {
     }, 300);
     
     return () => clearTimeout(timeout);
-  }, [makeupSearch, selectedClassId]);
+  }, [makeupSearch, classId]);
   
   const addMakeupStudent = useCallback((student: ClassStudent) => {
     // 이미 추가되어 있는지 체크
@@ -641,13 +632,6 @@ export function useFeedInput() {
   // ============================================================================
   
   return {
-    // 기본 상태
-    classes,
-    selectedClassId,
-    setSelectedClassId,
-    selectedDate,
-    setSelectedDate,
-    
     // 학생 및 피드 데이터
     students,
     cardDataMap,
@@ -663,6 +647,7 @@ export function useFeedInput() {
     // 핸들러
     handleAttendanceChange,
     handleNotifyParentChange,
+    handleNeedsMakeupChange,
     handleProgressChange,
     handleMemoChange,
     handleFeedValueChange,
