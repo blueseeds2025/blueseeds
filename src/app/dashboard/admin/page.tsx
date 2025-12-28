@@ -329,7 +329,7 @@ export default function AdminDashboard() {
           <CardContent>
             <div className="space-y-2">
               <button 
-                onClick={() => router.push('/dashboard/students')}
+                onClick={() => router.push('/dashboard/admin/students')}
                 className="w-full text-left p-3 rounded-lg hover:bg-gray-50 flex items-center gap-3"
               >
                 <Users className="h-5 w-5 text-gray-600" />

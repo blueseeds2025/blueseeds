@@ -30,15 +30,18 @@ export default async function FeedInputPage() {
       .from('classes')
       .select('id, name')
       .eq('tenant_id', profile.tenant_id)
+      .is('deleted_at', null)
       .order('name');
     
     classes = allClasses || [];
   } else {
     // 교사 담당 반
     const { data: teacherClasses } = await supabase
-      .from('teacher_classes')
+      .from('class_teachers')
       .select('class_id')
-      .eq('teacher_id', user.id);
+      .eq('teacher_id', user.id)
+      .eq('is_active', true)
+      .is('deleted_at', null);
     
     const classIds = (teacherClasses || []).map(tc => tc.class_id);
     
@@ -47,6 +50,7 @@ export default async function FeedInputPage() {
         .from('classes')
         .select('id, name')
         .in('id', classIds)
+        .is('deleted_at', null)
         .order('name');
       
       classes = classData || [];

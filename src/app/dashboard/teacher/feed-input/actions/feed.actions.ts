@@ -345,26 +345,48 @@ export async function getFeedOptionSets(): Promise<{
     
     if (setsError) throw setsError;
     
-    // 교사별 권한 확인 (teacher_feed_permissions)
-    let allowedSetIds: string[] | null = null;
+    // 교사별 권한 확인 (Premium 이상에서만 동작)
+    let filteredSets = sets;
     
     if (profile.role === 'teacher') {
-      const { data: permissions } = await supabase
-        .from('teacher_feed_permissions')
-        .select('option_set_id, is_allowed')
-        .eq('teacher_id', user.id);
+      // tenant_features에서 teacher_permissions 기능 활성화 여부 확인
+      const { data: featureData } = await supabase
+        .from('tenant_features')
+        .select('is_enabled')
+        .eq('tenant_id', profile.tenant_id)
+        .eq('feature_key', 'teacher_permissions')
+        .single();
       
-      if (permissions && permissions.length > 0) {
-        allowedSetIds = permissions
-          .filter(p => p.is_allowed)
-          .map(p => p.option_set_id);
+      const hasTeacherPermissionsFeature = featureData?.is_enabled ?? false;
+      
+      if (hasTeacherPermissionsFeature) {
+        // Premium: 교사별 권한 체크
+        const { data: permissions } = await supabase
+          .from('teacher_feed_permissions')
+          .select('option_set_id, is_allowed')
+          .eq('teacher_id', user.id)
+          .is('deleted_at', null);
+        
+        if (permissions && permissions.length > 0) {
+          // 권한 설정이 있으면: is_allowed=true인 세트만 허용
+          const allowedSetIds = permissions
+            .filter(p => p.is_allowed === true)
+            .map(p => p.option_set_id);
+          
+          // is_allowed=false인 세트 제외
+          const disallowedSetIds = permissions
+            .filter(p => p.is_allowed === false)
+            .map(p => p.option_set_id);
+          
+          // 설정된 세트만 필터링 (설정 안 된 세트는 기본 허용)
+          filteredSets = sets?.filter(s => 
+            !disallowedSetIds.includes(s.id)
+          );
+        }
+        // 권한 설정이 없으면: 모든 세트 허용 (기본값)
       }
+      // Basic: 권한 체크 안 함 (모든 세트 허용)
     }
-    
-    // 권한 필터링
-    const filteredSets = allowedSetIds 
-      ? sets?.filter(s => allowedSetIds!.includes(s.id))
-      : sets;
     
     // 각 세트의 옵션 조회
     const result: FeedOptionSet[] = [];

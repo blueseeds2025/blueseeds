@@ -101,8 +101,14 @@ export default function DashboardLayout({
     { 
       icon: Users, 
       label: '학생 관리', 
-      href: '/dashboard/students',
+      href: '/dashboard/admin/students',
       show: userRole === 'owner' 
+    },
+    { 
+      icon: Users, 
+      label: '학생 목록', 
+      href: '/dashboard/teacher/students',
+      show: userRole === 'teacher' 
     },
     { 
       icon: Calendar, 
