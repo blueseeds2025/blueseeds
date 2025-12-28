@@ -151,10 +151,15 @@ export interface SaveFeedResponse {
 }
 
 // 테넌트 설정
+// 요금제 타입
+export type PlanType = 'basic' | 'premium' | 'enterprise';
+
 export interface TenantSettings {
   progress_enabled: boolean;
   materials_enabled: boolean;
   makeup_defaults?: Record<string, boolean>;
+  plan: PlanType;
+  features: string[];  // 활성화된 기능 목록
 }
 
 // 바텀시트 상태

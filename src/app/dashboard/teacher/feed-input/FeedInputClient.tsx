@@ -269,14 +269,16 @@ export default function FeedInputClient({
               + 메모 추가
             </button>
             
-            {/* 보강 버튼 */}
-            <button
-              onClick={openMakeupPanel}
-              className="px-3 py-2 bg-[#7C3AED] hover:bg-[#6D28D9] text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5"
-            >
-              <span>📋</span>
-              <span>보강</span>
-            </button>
+            {/* 보강 버튼 (makeup_system 기능 활성화 시만) */}
+            {tenantSettings.features?.includes('makeup_system') && (
+              <button
+                onClick={openMakeupPanel}
+                className="px-3 py-2 bg-[#7C3AED] hover:bg-[#6D28D9] text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5"
+              >
+                <span>📋</span>
+                <span>보강</span>
+              </button>
+            )}
             
             {/* 전체 저장 버튼 */}
             <div className="ml-auto">

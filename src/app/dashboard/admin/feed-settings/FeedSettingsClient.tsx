@@ -42,6 +42,7 @@ import PresetSaveModal from './components/PresetSaveModal';
 import TemplateSelectModal from './components/TemplateSelectModal';
 import AddItemForm from './components/AddItemForm';
 import { ScoringWizardModal } from './components/WizardModals';
+import MakeupSettingsSection from './components/MakeupSettingsSection';
 
 const presetStorageKey = (tenantId: string) => `feed_last_preset_name:${tenantId}`;
 
@@ -166,6 +167,9 @@ export default function FeedSettingsClient() {
   const [editingSetId, setEditingSetId] = useState<string | null>(null);
   const [editingSetName, setEditingSetName] = useState('');
   const [newlyCreatedSetId, setNewlyCreatedSetId] = useState<string | null>(null); // 방금 생성된 세트 ID
+  
+  // Feature flag state
+  const [hasMakeupSystem, setHasMakeupSystem] = useState(false);
 
   // Add item form state
   const [isAddingItem, setIsAddingItem] = useState(false);
@@ -267,6 +271,25 @@ export default function FeedSettingsClient() {
     setNewItemName('');
     setNewItemCategory(null);
   }, [setShowPresetModal, setPresetName]);
+
+  // Feature flags 로드
+  useEffect(() => {
+    const loadFeatures = async () => {
+      const tenantId = await getTenantId();
+      if (!tenantId) return;
+      
+      const { data: features } = await supabase
+        .from('tenant_features')
+        .select('feature_key')
+        .eq('tenant_id', tenantId)
+        .eq('is_enabled', true);
+      
+      const featureKeys = features?.map(f => f.feature_key) || [];
+      setHasMakeupSystem(featureKeys.includes('makeup_system'));
+    };
+    
+    loadFeatures();
+  }, [supabase, getTenantId]);
 
   useEffect(() => {
     if (!showPresetModal) return;
@@ -644,6 +667,17 @@ export default function FeedSettingsClient() {
       <BasicSettingsSection 
         supabase={supabase} 
         getTenantId={getTenantId} 
+      />
+
+      {/* 결석/보강 설정 */}
+      <MakeupSettingsSection
+        supabase={supabase}
+        getTenantId={getTenantId}
+        hasMakeupSystem={hasMakeupSystem}
+        onUpgradeClick={() => {
+          // TODO: 업그레이드 안내 모달 또는 페이지로 이동
+          toast.info('프리미엄 요금제로 업그레이드하시면 결석/보강 관리 기능을 사용하실 수 있습니다.');
+        }}
       />
 
       {/* Modals */}

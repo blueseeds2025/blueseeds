@@ -560,10 +560,20 @@ export async function getTenantSettings(): Promise<{
     
     const { data: tenant } = await supabase
       .from('tenants')
-      .select('settings')
+      .select('settings, plan')
       .eq('id', profile.tenant_id)
       .single();
     
+    // 활성화된 기능 목록 조회
+    const { data: featureRows } = await supabase
+      .from('tenant_features')
+      .select('feature_key')
+      .eq('tenant_id', profile.tenant_id)
+      .eq('is_enabled', true)
+      .is('deleted_at', null)
+      .or('expires_at.is.null,expires_at.gt.now()');
+    
+    const features = featureRows?.map(f => f.feature_key) || [];
     const settings = tenant?.settings as Record<string, any> || {};
     
     return {
@@ -578,6 +588,8 @@ export async function getTenantSettings(): Promise<{
           '무단': false,
           '기타': true,
         },
+        plan: (tenant?.plan as 'basic' | 'premium' | 'enterprise') ?? 'basic',
+        features,
       },
     };
   } catch (error) {
@@ -611,6 +623,18 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
     if (!profile) {
       return { success: false, error: '프로필을 찾을 수 없습니다' };
     }
+    
+    // 테넌트 기능 확인
+    const { data: featureRows } = await supabase
+      .from('tenant_features')
+      .select('feature_key')
+      .eq('tenant_id', profile.tenant_id)
+      .eq('is_enabled', true)
+      .is('deleted_at', null)
+      .or('expires_at.is.null,expires_at.gt.now()');
+    
+    const enabledFeatures = featureRows?.map(f => f.feature_key) || [];
+    const hasMakeupSystem = enabledFeatures.includes('makeup_system');
     
     // Idempotency 체크
     const { data: existingKey } = await supabase
@@ -673,17 +697,19 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
           .delete()
           .eq('feed_id', feedId);
         
-        // 보강 티켓 처리 (결석 시 티켓 생성/취소)
-        await handleMakeupTicket(supabase, {
-          feedId,
-          tenantId: profile.tenant_id,
-          studentId: payload.studentId,
-          classId: payload.classId,
-          feedDate: payload.feedDate,
-          absenceReason: payload.absenceReason,
-          needsMakeup: payload.needsMakeup ?? false,
-          attendanceStatus: payload.attendanceStatus,
-        });
+        // 보강 티켓 처리 (프리미엄 이상만 - 결석 시 티켓 생성/취소)
+        if (hasMakeupSystem) {
+          await handleMakeupTicket(supabase, {
+            feedId,
+            tenantId: profile.tenant_id,
+            studentId: payload.studentId,
+            classId: payload.classId,
+            feedDate: payload.feedDate,
+            absenceReason: payload.absenceReason,
+            needsMakeup: payload.needsMakeup ?? false,
+            attendanceStatus: payload.attendanceStatus,
+          });
+        }
           
       } else {
         // INSERT
@@ -711,17 +737,19 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
         if (insertError) throw insertError;
         feedId = newFeed.id;
         
-        // 보강 티켓 처리 (결석 시 티켓 생성)
-        await handleMakeupTicket(supabase, {
-          feedId,
-          tenantId: profile.tenant_id,
-          studentId: payload.studentId,
-          classId: payload.classId,
-          feedDate: payload.feedDate,
-          absenceReason: payload.absenceReason,
-          needsMakeup: payload.needsMakeup ?? false,
-          attendanceStatus: payload.attendanceStatus,
-        });
+        // 보강 티켓 처리 (프리미엄 이상만 - 결석 시 티켓 생성)
+        if (hasMakeupSystem) {
+          await handleMakeupTicket(supabase, {
+            feedId,
+            tenantId: profile.tenant_id,
+            studentId: payload.studentId,
+            classId: payload.classId,
+            feedDate: payload.feedDate,
+            absenceReason: payload.absenceReason,
+            needsMakeup: payload.needsMakeup ?? false,
+            attendanceStatus: payload.attendanceStatus,
+          });
+        }
       }
       
     } else {
@@ -767,6 +795,14 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
           .from('feed_values')
           .delete()
           .eq('feed_id', feedId);
+        
+        // 보강 티켓 완료 처리 (UPDATE 시에도)
+        await completeMakeupTicket(
+          supabase,
+          payload.makeupTicketId,
+          payload.feedDate,
+          payload.classId
+        );
           
       } else {
         // INSERT (새 보강 피드)
