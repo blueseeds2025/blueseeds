@@ -1,28 +1,42 @@
 // ============================================================================
-// 교사 피드 입력 타입 정의
+// 피드 입력 관련 타입 정의
 // ============================================================================
 
-// 학생 정보
-export interface Student {
-  id: string;
-  name: string;
-  display_code: string;
-}
+// 출결 상태
+export type AttendanceStatus = 'present' | 'late' | 'absent';
+
+// 결석 사유
+export type AbsenceReason = '병결' | '학교행사' | '가사' | '무단' | '기타';
+
+// 카드 상태
+export type CardStatus = 'empty' | 'error' | 'dirty' | 'saved';
 
 // 반 정보
 export interface ClassInfo {
   id: string;
   name: string;
-  color: string;
+  color?: string;
 }
 
-// 반에 속한 학생
-export interface ClassStudent extends Student {
+// 학생 정보
+export interface ClassStudent {
+  id: string;
+  name: string;
+  display_code: string;
   class_id: string;
-  is_makeup?: boolean;  // 보강생 여부
+  is_makeup?: boolean;
 }
 
-// 피드 옵션 세트 (숙제, 태도 등)
+// 피드 옵션
+export interface FeedOption {
+  id: string;
+  set_id: string;
+  label: string;
+  score: number | null;
+  display_order: number;
+}
+
+// 피드 옵션 세트
 export interface FeedOptionSet {
   id: string;
   name: string;
@@ -32,72 +46,11 @@ export interface FeedOptionSet {
   options: FeedOption[];
 }
 
-// 피드 옵션 (완료, 미흡, 미제출 등)
-export interface FeedOption {
-  id: string;
-  set_id: string;
-  label: string;
-  score: number | null;
-  display_order: number;
-}
-
-// 출결 상태
-export type AttendanceStatus = 'present' | 'late' | 'absent';
-// 결석 사유
-export type AbsenceReason = 
-  | '병결' 
-  | '가사' 
-  | '학교행사' 
-  | '무단' 
-  | '지각' 
-  | '기타';
-
-// 카드 저장 상태
-export type CardStatus = 
-  | 'empty'    // 아무것도 입력 안 됨
-  | 'error'    // 🔴 필수값 누락
-  | 'dirty'    // 🟡 변경됨 (미저장)
-  | 'saved';   // 🟢 저장 완료
-
-// 메모 필드 정의
+// 메모 필드
 export interface MemoField {
   id: string;
   name: string;
-  isFixed: boolean;  // 특이사항은 고정
-}
-
-// 학생 카드 데이터 (로컬 상태)
-export interface StudentCardData {
-  studentId: string;
-  studentName: string;
-  isMakeup: boolean;
-  
-  // 출결
-  attendanceStatus: AttendanceStatus;
-  absenceReason?: AbsenceReason;
-  absenceReasonDetail?: string;  // 기타 선택 시
-  notifyParent: boolean;
-  needsMakeup?: boolean;  // 보강 필요 여부
-  
-  // 진도 (ON/OFF 가능)
-  progressText?: string;
-  previousProgress?: string;  // placeholder용 이전 진도
-  
-  // 피드 항목별 값
-  feedValues: Record<string, string | null>;  // set_id → option_id
-  
-  // 메모 (필드별)
-  memoValues: Record<string, string>;  // field_id → 내용
-  
-  // 교재 사용 (ON/OFF 가능)
-  materials: MaterialUsage[];
-  
-  // 상태
-  status: CardStatus;
-  isDirty: boolean;
-  
-  // 저장된 원본 (비교용)
-  savedData?: SavedFeedData;
+  isFixed: boolean;
 }
 
 // 교재 사용 기록
@@ -124,6 +77,43 @@ export interface SavedFeedData {
   }[];
 }
 
+// 학생 카드 데이터 (로컬 상태)
+export interface StudentCardData {
+  studentId: string;
+  studentName: string;
+  isMakeup: boolean;
+  
+  // 출결
+  attendanceStatus: AttendanceStatus;
+  absenceReason?: AbsenceReason;
+  absenceReasonDetail?: string;
+  notifyParent: boolean;
+  needsMakeup?: boolean;
+  
+  // 진도
+  progressText?: string;
+  previousProgress?: string;
+  
+  // 피드 항목별 값
+  feedValues: Record<string, string | null>;
+  
+  // 메모 (필드별)
+  memoValues: Record<string, string>;
+  
+  // 교재 사용
+  materials: MaterialUsage[];
+  
+  // 상태
+  status: CardStatus;
+  isDirty: boolean;
+  
+  // 저장된 원본 (비교용)
+  savedData?: SavedFeedData;
+}
+
+// 세션 타입
+export type SessionType = 'regular' | 'makeup';
+
 // 저장 요청 payload
 export interface SaveFeedPayload {
   studentId: string;
@@ -135,7 +125,11 @@ export interface SaveFeedPayload {
   absenceReasonDetail?: string;
   notifyParent: boolean;
   isMakeup: boolean;
-  needsMakeup?: boolean;  // 보강 필요 여부
+  needsMakeup?: boolean;
+  
+  // 세션 타입 (regular: 정규수업, makeup: 보강)
+  sessionType: SessionType;
+  makeupTicketId?: string;  // 보강 시 연결할 티켓 ID
   
   progressText?: string;
   memoValues?: Record<string, string>;
@@ -160,7 +154,7 @@ export interface SaveFeedResponse {
 export interface TenantSettings {
   progress_enabled: boolean;
   materials_enabled: boolean;
-  makeup_defaults?: Record<string, boolean>;  // 결석 사유별 보강 기본값
+  makeup_defaults?: Record<string, boolean>;
 }
 
 // 바텀시트 상태

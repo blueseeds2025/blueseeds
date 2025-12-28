@@ -6,7 +6,7 @@ import StudentCard from './components/StudentCard';
 import FeedOptionPicker from './components/FeedOptionPicker';
 import { useFeedInput } from './hooks/useFeedInput';
 import { formatDisplayDate, getGridClass, calculateGridColumns } from './constants';
-import { FeedOption } from './types';
+import { FeedOption, AttendanceStatus } from './types';
 
 interface FeedInputClientProps {
   initialClasses: { id: string; name: string }[];
@@ -50,6 +50,9 @@ export default function FeedInputClient({
     anchorEl: null,
   });
   
+  // 보강 모달용 상태 (추가된 티켓 ID들)
+  const [addedTicketIds, setAddedTicketIds] = useState<string[]>([]);
+  
   const {
     students,
     cardDataMap,
@@ -63,6 +66,7 @@ export default function FeedInputClient({
     dirtyCount,
     handleAttendanceChange,
     handleNotifyParentChange,
+    handleNeedsMakeupChange,
     handleProgressChange,
     handleMemoChange,
     handleFeedValueChange,
@@ -70,6 +74,25 @@ export default function FeedInputClient({
     handleSaveAll,
     addMemoField,
     removeMemoField,
+    // 보강 관련
+    pendingMakeupTickets,
+    isLoadingMakeupTickets,
+    makeupPanelOpen,
+    makeupSearchQuery,
+    setMakeupSearchQuery,
+    openMakeupPanel,
+    closeMakeupPanel,
+    addMakeupStudentFromTicket,
+    loadPendingMakeupTickets,
+    // 보강 전용 상태 및 핸들러
+    makeupCardDataMap,
+    handleMakeupAttendanceChange,
+    handleMakeupProgressChange,
+    handleMakeupMemoChange,
+    handleMakeupFeedValueChange,
+    handleMakeupSave,
+    handleMakeupSaveAll,
+    makeupDirtyCount,
   } = useFeedInput({
     classId: selectedClassId,
     date: selectedDate,
@@ -129,7 +152,7 @@ export default function FeedInputClient({
     setOptionPicker(prev => ({ ...prev, isOpen: false, anchorEl: null }));
   };
   
-  // 옵션 선택
+  // 옵션 선택 (정규 피드용)
   const handleOptionSelect = (optionId: string) => {
     if (optionPicker.studentId && optionPicker.setId) {
       handleFeedValueChange(optionPicker.studentId, optionPicker.setId, optionId);
@@ -145,71 +168,58 @@ export default function FeedInputClient({
     }
   };
   
-  // 보강생 검색
-  const [makeupSearch, setMakeupSearch] = useState('');
-  const [makeupResults, setMakeupResults] = useState<{ id: string; name: string; display_code: string; hasPendingMakeup?: boolean }[]>([]);
-  const [isSearchingMakeup, setIsSearchingMakeup] = useState(false);
+  // 날짜 포맷 (보강 목록용)
+  const formatAbsenceDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return `${date.getMonth() + 1}/${date.getDate()}`;
+  };
   
-  useEffect(() => {
-    if (makeupSearch.length < 2) {
-      setMakeupResults([]);
-      return;
+  // 보강 모달에서 학생 추가
+  const handleAddMakeupStudent = (ticket: Parameters<typeof addMakeupStudentFromTicket>[0]) => {
+    addMakeupStudentFromTicket(ticket);
+    setAddedTicketIds(prev => [...prev, ticket.id]);
+  };
+  
+  // 보강 모달 닫기
+  const handleCloseMakeupModal = () => {
+    closeMakeupPanel();  // 훅에서 makeupCardDataMap 초기화
+    setAddedTicketIds([]);
+    setMakeupSearchQuery('');
+  };
+  
+  // 보강 저장 후 모달 닫기 및 목록 새로고침
+  const handleSaveMakeupAndClose = async () => {
+    await handleMakeupSaveAll();
+    // 저장 성공 시 목록 새로고침
+    await loadPendingMakeupTickets();
+    handleCloseMakeupModal();
+  };
+  
+  // 보강 모달용 옵션 피커 열기
+  const openMakeupOptionPicker = (ticketId: string, setId: string, anchorEl: HTMLElement) => {
+    const set = optionSets.find(s => s.id === setId);
+    if (!set) return;
+    
+    const cardData = makeupCardDataMap[ticketId];
+    const currentValue = cardData?.feedValues[setId] || null;
+    
+    setOptionPicker({
+      isOpen: true,
+      studentId: ticketId,  // ticketId를 studentId 자리에 사용
+      setId,
+      setName: set.name,
+      options: set.options,
+      currentValue,
+      anchorEl,
+    });
+  };
+  
+  // 보강 모달용 옵션 선택
+  const handleMakeupOptionSelect = (optionId: string) => {
+    if (optionPicker.studentId && optionPicker.setId) {
+      // studentId 자리에 ticketId가 들어있음
+      handleMakeupFeedValueChange(optionPicker.studentId, optionPicker.setId, optionId);
     }
-    
-    const searchStudents = async () => {
-      setIsSearchingMakeup(true);
-      try {
-        const { createBrowserClient } = await import('@supabase/ssr');
-        const supabase = createBrowserClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-        );
-        
-        // 1. 보강 대기중인 학생 먼저 조회
-        const { data: pendingTickets } = await supabase
-          .from('makeup_tickets')
-          .select('student_id')
-          .eq('status', 'pending');
-        
-        const pendingStudentIds = new Set(pendingTickets?.map(t => t.student_id) || []);
-        
-        // 2. 학생 검색
-        const { data } = await supabase
-          .from('students')
-          .select('id, name, display_code')
-          .eq('tenant_id', tenantId)
-          .ilike('name', `%${makeupSearch}%`)
-          .limit(10);
-        
-        const existingIds = students.map(s => s.id);
-        const filtered = (data || [])
-          .filter(s => !existingIds.includes(s.id))
-          .map(s => ({
-            ...s,
-            hasPendingMakeup: pendingStudentIds.has(s.id),
-          }))
-          // 보강 필요 학생 먼저 정렬
-          .sort((a, b) => {
-            if (a.hasPendingMakeup && !b.hasPendingMakeup) return -1;
-            if (!a.hasPendingMakeup && b.hasPendingMakeup) return 1;
-            return 0;
-          });
-        
-        setMakeupResults(filtered);
-      } finally {
-        setIsSearchingMakeup(false);
-      }
-    };
-    
-    const debounce = setTimeout(searchStudents, 300);
-    return () => clearTimeout(debounce);
-  }, [makeupSearch, tenantId, students]);
-  
-  const addMakeupStudent = (student: { id: string; name: string; display_code: string }) => {
-    // TODO: 보강생 추가 로직
-    toast.success(`${student.name} 보강생 추가됨`);
-    setMakeupSearch('');
-    setMakeupResults([]);
   };
   
   return (
@@ -257,6 +267,15 @@ export default function FeedInputClient({
               className="px-3 py-2 border border-dashed border-[#D1D5DB] rounded-lg text-sm text-[#6B7280] hover:border-[#6366F1] hover:text-[#6366F1] transition-colors"
             >
               + 메모 추가
+            </button>
+            
+            {/* 보강 버튼 */}
+            <button
+              onClick={openMakeupPanel}
+              className="px-3 py-2 bg-[#7C3AED] hover:bg-[#6D28D9] text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5"
+            >
+              <span>📋</span>
+              <span>보강</span>
             </button>
             
             {/* 전체 저장 버튼 */}
@@ -345,6 +364,281 @@ export default function FeedInputClient({
         </>
       )}
       
+      {/* 보강 전체화면 모달 */}
+      {makeupPanelOpen && (
+        <>
+          {/* 블러 배경 */}
+          <div 
+            className="fixed inset-0 z-40 bg-white/60 backdrop-blur-sm"
+            onClick={handleCloseMakeupModal}
+          />
+          
+          {/* 모달 본체 */}
+          <div className="fixed inset-4 md:inset-8 lg:inset-12 z-50 bg-[#F7F6F3] rounded-2xl shadow-2xl border border-[#E5E7EB] overflow-hidden flex flex-col">
+          {/* 헤더 */}
+          <div className="flex-shrink-0 bg-white border-b border-[#E5E7EB]">
+            <div className="px-4 md:px-6 py-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <h1 className="text-xl font-bold text-[#1F2937] flex items-center gap-2">
+                    <span>📋</span>
+                    보강 수업
+                  </h1>
+                  <span className="text-sm text-[#6B7280]">
+                    {formatDisplayDate(new Date(selectedDate))}
+                  </span>
+                </div>
+                
+                <div className="flex items-center gap-3">
+                  {/* 저장 버튼 */}
+                  <button
+                    onClick={handleSaveMakeupAndClose}
+                    disabled={isSaving || makeupDirtyCount === 0}
+                    className={`
+                      px-6 py-2 rounded-lg font-medium transition-all
+                      ${makeupDirtyCount > 0
+                        ? 'bg-[#7C3AED] hover:bg-[#6D28D9] text-white'
+                        : 'bg-[#E5E7EB] text-[#9CA3AF] cursor-not-allowed'
+                      }
+                    `}
+                  >
+                    {isSaving ? '저장 중...' : `저장 ${makeupDirtyCount > 0 ? `(${makeupDirtyCount})` : ''}`}
+                  </button>
+                  
+                  {/* 닫기 버튼 */}
+                  <button
+                    onClick={handleCloseMakeupModal}
+                    className="p-2 text-[#6B7280] hover:text-[#1F2937] hover:bg-[#F3F4F6] rounded-lg transition-colors"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {/* 컨텐츠 */}
+          <div className="flex-1 overflow-y-auto">
+            <div className="p-4 md:p-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* 왼쪽: 보강 대기 목록 */}
+              <div className="lg:col-span-1">
+                <div className="bg-white rounded-xl shadow-sm border border-[#E5E7EB] overflow-hidden">
+                  <div className="px-4 py-3 border-b border-[#E5E7EB] bg-[#F9FAFB]">
+                    <h2 className="font-semibold text-[#1F2937]">보강 대기 학생</h2>
+                  </div>
+                  
+                  {/* 검색 */}
+                  <div className="p-3 border-b border-[#E5E7EB]">
+                    <input
+                      type="text"
+                      placeholder="학생 이름 검색..."
+                      value={makeupSearchQuery}
+                      onChange={(e) => setMakeupSearchQuery(e.target.value)}
+                      className="w-full px-3 py-2 border border-[#E5E7EB] rounded-lg text-sm text-[#1F2937] placeholder-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/30"
+                    />
+                  </div>
+                  
+                  {/* 목록 */}
+                  <div className="max-h-[400px] overflow-y-auto">
+                    {isLoadingMakeupTickets ? (
+                      <div className="flex items-center justify-center py-10">
+                        <div className="animate-spin rounded-full h-6 w-6 border-2 border-[#7C3AED] border-t-transparent" />
+                      </div>
+                    ) : pendingMakeupTickets.length === 0 ? (
+                      <div className="text-center py-10 text-[#9CA3AF]">
+                        {makeupSearchQuery ? '검색 결과가 없습니다' : '보강 대기 학생이 없습니다'}
+                      </div>
+                    ) : (
+                      <ul className="divide-y divide-[#F3F4F6]">
+                        {pendingMakeupTickets.map(ticket => {
+                          const isAdded = addedTicketIds.includes(ticket.id);
+                          return (
+                            <li key={ticket.id}>
+                              <button
+                                onClick={() => !isAdded && handleAddMakeupStudent(ticket)}
+                                disabled={isAdded}
+                                className={`
+                                  w-full px-4 py-3 text-left transition-colors
+                                  ${isAdded 
+                                    ? 'bg-[#F3F4F6] cursor-not-allowed' 
+                                    : 'hover:bg-[#FAF5FF]'
+                                  }
+                                `}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <span className={`font-medium ${isAdded ? 'text-[#9CA3AF]' : 'text-[#1F2937]'}`}>
+                                      {ticket.studentName}
+                                    </span>
+                                    <span className="text-[#9CA3AF] text-sm ml-2">
+                                      ({ticket.className} · {ticket.displayCode})
+                                    </span>
+                                  </div>
+                                  <div className="text-right">
+                                    {isAdded ? (
+                                      <span className="text-xs text-[#7C3AED] font-medium">추가됨</span>
+                                    ) : (
+                                      <>
+                                        <span className="text-sm text-[#6B7280]">{formatAbsenceDate(ticket.absenceDate)}</span>
+                                        <span className="text-xs text-[#9CA3AF] ml-2">{ticket.absenceReason || '-'}</span>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              </div>
+              
+              {/* 오른쪽: 추가된 보강생 카드들 */}
+              <div className="lg:col-span-2">
+                {addedTicketIds.length === 0 ? (
+                  <div className="bg-white rounded-xl shadow-sm border border-[#E5E7EB] p-10 text-center">
+                    <div className="text-[#9CA3AF]">
+                      <p className="text-lg mb-2">왼쪽에서 보강 학생을 선택하세요</p>
+                      <p className="text-sm">선택한 학생의 피드 카드가 여기에 표시됩니다</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {addedTicketIds.map(ticketId => {
+                      const cardData = makeupCardDataMap[ticketId];
+                      if (!cardData) return null;
+                      
+                      // 보강 카드는 간단한 인라인 UI 사용
+                      return (
+                        <div 
+                          key={ticketId}
+                          className={`
+                            bg-white rounded-xl border-2 p-4 transition-all
+                            ${cardData.status === 'saved' 
+                              ? 'border-[#10B981] bg-[#F0FDF4]' 
+                              : cardData.isDirty 
+                                ? 'border-[#6366F1]' 
+                                : 'border-[#E5E7EB]'
+                            }
+                          `}
+                        >
+                          {/* 헤더 */}
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-[#1F2937]">{cardData.studentName}</span>
+                              <span className="text-xs px-2 py-0.5 bg-[#7C3AED] text-white rounded">보강</span>
+                            </div>
+                            {cardData.status === 'saved' && (
+                              <span className="text-[#10B981]">●</span>
+                            )}
+                          </div>
+                          
+                          {/* 출결 */}
+                          <div className="mb-3">
+                            <label className="text-xs text-[#6B7280] block mb-1">출결</label>
+                            <select
+                              value={cardData.attendanceStatus}
+                              onChange={(e) => handleMakeupAttendanceChange(ticketId, e.target.value as AttendanceStatus)}
+                              className="w-full px-3 py-2 border border-[#E5E7EB] rounded-lg text-sm"
+                            >
+                              <option value="present">출석</option>
+                              <option value="late">지각</option>
+                              <option value="absent">결석</option>
+                            </select>
+                          </div>
+                          
+                          {/* 진도 */}
+                          {tenantSettings.progress_enabled && cardData.attendanceStatus !== 'absent' && (
+                            <div className="mb-3">
+                              <label className="text-xs text-[#6B7280] block mb-1">진도</label>
+                              <input
+                                type="text"
+                                value={cardData.progressText || ''}
+                                onChange={(e) => handleMakeupProgressChange(ticketId, e.target.value)}
+                                placeholder="진도 입력"
+                                className="w-full px-3 py-2 border border-[#E5E7EB] rounded-lg text-sm"
+                              />
+                            </div>
+                          )}
+                          
+                          {/* 피드 옵션들 */}
+                          {cardData.attendanceStatus !== 'absent' && optionSets.map(set => (
+                            <div key={set.id} className="mb-3">
+                              <label className="text-xs text-[#6B7280] block mb-1">
+                                {set.name}
+                                {set.is_required && <span className="text-red-500">*</span>}
+                              </label>
+                              <button
+                                onClick={(e) => openMakeupOptionPicker(ticketId, set.id, e.currentTarget)}
+                                className={`
+                                  w-full px-3 py-2 rounded-lg text-sm text-left transition-colors
+                                  ${cardData.feedValues[set.id]
+                                    ? 'bg-[#10B981] text-white'
+                                    : 'bg-[#FEE2E2] text-[#DC2626]'
+                                  }
+                                `}
+                              >
+                                {cardData.feedValues[set.id]
+                                  ? set.options.find(o => o.id === cardData.feedValues[set.id])?.label || '선택'
+                                  : '선택'
+                                }
+                              </button>
+                            </div>
+                          ))}
+                          
+                          {/* 메모 */}
+                          {memoFields.map(field => (
+                            <div key={field.id} className="mb-3">
+                              <label className="text-xs text-[#6B7280] block mb-1">{field.name}</label>
+                              <input
+                                type="text"
+                                value={cardData.memoValues?.[field.id] || ''}
+                                onChange={(e) => handleMakeupMemoChange(ticketId, field.id, e.target.value)}
+                                placeholder={`${field.name} 입력`}
+                                className="w-full px-3 py-2 border border-[#E5E7EB] rounded-lg text-sm"
+                              />
+                            </div>
+                          ))}
+                          
+                          {/* 저장 버튼 */}
+                          <button
+                            onClick={() => handleMakeupSave(ticketId)}
+                            disabled={isSaving || (!cardData.isDirty && cardData.status !== 'dirty')}
+                            className={`
+                              w-full py-2.5 rounded-lg font-medium text-sm transition-colors
+                              ${cardData.status === 'saved'
+                                ? 'bg-[#D1FAE5] text-[#10B981]'
+                                : cardData.isDirty || cardData.status === 'dirty'
+                                  ? 'bg-[#7C3AED] hover:bg-[#6D28D9] text-white'
+                                  : 'bg-[#F3F4F6] text-[#9CA3AF]'
+                              }
+                            `}
+                          >
+                            {savingStudentId === ticketId 
+                              ? '저장 중...' 
+                              : cardData.status === 'saved' 
+                                ? '✓ 저장됨' 
+                                : '저장'
+                            }
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+            </div>
+          </div>
+          </div>
+        </>
+      )}
+      
       {/* 메인 컨텐츠 */}
       <div className="max-w-7xl mx-auto px-4 py-6" ref={containerRef}>
         {isLoading ? (
@@ -377,6 +671,7 @@ export default function FeedInputClient({
                     onOpenOptionPicker={openOptionPicker}
                     onAttendanceChange={handleAttendanceChange}
                     onNotifyParentChange={handleNotifyParentChange}
+                    onNeedsMakeupChange={handleNeedsMakeupChange}
                     onProgressChange={handleProgressChange}
                     onMemoChange={handleMemoChange}
                     onSave={handleSave}
@@ -384,60 +679,6 @@ export default function FeedInputClient({
                   />
                 );
               })}
-              
-              {/* 보강생 추가 카드 */}
-              <div 
-                className="rounded-xl p-3 flex flex-col items-center justify-center min-h-[160px] bg-white/80 hover:bg-[#FAF5FF] transition-all"
-                style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}
-              >
-                <div className="text-center mb-3">
-                  <div className="w-8 h-8 rounded-full bg-[#F3E8FF] flex items-center justify-center mx-auto mb-1.5">
-                    <span className="text-[#7C3AED] text-lg font-bold">+</span>
-                  </div>
-                  <p className="text-[#6B7280] font-semibold text-sm">보강생 추가</p>
-                </div>
-                
-                <div className="w-full">
-                  <input
-                    type="text"
-                    placeholder="학생 이름 검색 (2글자 이상)"
-                    value={makeupSearch}
-                    onChange={(e) => setMakeupSearch(e.target.value)}
-                    className="w-full px-2 py-1.5 border border-[#E5E7EB] rounded text-sm text-[#1F2937] placeholder-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/30"
-                  />
-                  
-                  {isSearchingMakeup && (
-                    <p className="text-xs text-[#9CA3AF] mt-1.5 text-center">검색 중...</p>
-                  )}
-                  
-                  {makeupResults.length > 0 && (
-                    <ul className="mt-1.5 border border-[#E5E7EB] rounded divide-y divide-[#F3F4F6] max-h-32 overflow-y-auto bg-white">
-                      {makeupResults.map(student => (
-                        <li key={student.id}>
-                          <button
-                            onClick={() => addMakeupStudent(student)}
-                            className={`w-full px-2 py-1.5 text-left hover:bg-[#FAF5FF] transition-colors text-sm ${
-                              student.hasPendingMakeup ? 'bg-[#FEF3C7]' : ''
-                            }`}
-                          >
-                            <span className="font-semibold text-[#1F2937]">{student.name}</span>
-                            <span className="text-[#9CA3AF] ml-1.5 text-xs">{student.display_code}</span>
-                            {student.hasPendingMakeup && (
-                              <span className="ml-2 px-1.5 py-0.5 text-xs font-medium bg-[#F59E0B] text-white rounded">
-                                보강필요
-                              </span>
-                            )}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  
-                  {makeupSearch.length >= 2 && makeupResults.length === 0 && !isSearchingMakeup && (
-                    <p className="text-xs text-[#9CA3AF] mt-1.5 text-center">검색 결과 없음</p>
-                  )}
-                </div>
-              </div>
             </div>
           </>
         )}
@@ -450,12 +691,12 @@ export default function FeedInputClient({
         options={optionPicker.options}
         currentValue={optionPicker.currentValue}
         anchorEl={optionPicker.anchorEl}
-        onSelect={handleOptionSelect}
+        onSelect={makeupPanelOpen ? handleMakeupOptionSelect : handleOptionSelect}
         onClose={closeOptionPicker}
       />
       
-      {/* Dirty 상태 경고 */}
-      {hasDirtyCards && (
+      {/* Dirty 상태 경고 (보강 모달 열려있을 땐 숨김) */}
+      {hasDirtyCards && !makeupPanelOpen && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-20">
           <div className="bg-[#F59E0B] text-white px-5 py-2.5 rounded-full shadow-lg text-sm font-medium flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-white animate-pulse" />

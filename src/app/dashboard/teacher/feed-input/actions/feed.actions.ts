@@ -13,6 +13,21 @@ import {
 } from './types';
 
 // ============================================================================
+// 보강 티켓 타입
+// ============================================================================
+
+export interface PendingMakeupTicket {
+  id: string;
+  studentId: string;
+  studentName: string;
+  displayCode: string;
+  className: string;
+  classId: string;
+  absenceDate: string;
+  absenceReason: string | null;
+}
+
+// ============================================================================
 // 보강 티켓 헬퍼
 // ============================================================================
 
@@ -76,6 +91,115 @@ async function handleMakeupTicket(
         updated_at: new Date().toISOString(),
       })
       .eq('id', existingTicket.id);
+  }
+}
+
+// 보강 완료 처리 헬퍼
+async function completeMakeupTicket(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  ticketId: string,
+  makeupDate: string,
+  makeupClassId: string
+) {
+  console.log('completeMakeupTicket called:', { ticketId, makeupDate, makeupClassId });
+  
+  const { error } = await supabase
+    .from('makeup_tickets')
+    .update({
+      status: 'completed',
+      makeup_date: makeupDate,
+      makeup_class_id: makeupClassId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', ticketId);
+  
+  if (error) {
+    console.error('completeMakeupTicket error:', error);
+  } else {
+    console.log('completeMakeupTicket success');
+  }
+}
+
+// ============================================================================
+// 보강 대기 티켓 조회
+// ============================================================================
+
+export async function getPendingMakeupTickets(): Promise<{
+  success: boolean;
+  data?: PendingMakeupTicket[];
+  error?: string;
+}> {
+  try {
+    const supabase = await createClient();
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { success: false, error: '로그인이 필요합니다' };
+    }
+    
+    // 프로필에서 tenant_id 확인
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('tenant_id')
+      .eq('id', user.id)
+      .single();
+    
+    if (!profile) {
+      return { success: false, error: '프로필을 찾을 수 없습니다' };
+    }
+    
+    // pending 상태 티켓 조회
+    const { data: tickets, error: ticketsError } = await supabase
+      .from('makeup_tickets')
+      .select('id, student_id, class_id, absence_date, absence_reason')
+      .eq('tenant_id', profile.tenant_id)
+      .eq('status', 'pending')
+      .order('absence_date', { ascending: true });
+    
+    if (ticketsError) throw ticketsError;
+    
+    if (!tickets || tickets.length === 0) {
+      return { success: true, data: [] };
+    }
+    
+    // 학생 정보 조회
+    const studentIds = [...new Set(tickets.map(t => t.student_id))];
+    const { data: students } = await supabase
+      .from('students')
+      .select('id, name, display_code')
+      .in('id', studentIds);
+    
+    const studentMap = new Map(
+      (students || []).map(s => [s.id, { name: s.name, displayCode: s.display_code }])
+    );
+    
+    // 반 정보 조회
+    const classIds = [...new Set(tickets.map(t => t.class_id))];
+    const { data: classes } = await supabase
+      .from('classes')
+      .select('id, name')
+      .in('id', classIds);
+    
+    const classMap = new Map(
+      (classes || []).map(c => [c.id, c.name])
+    );
+    
+    // 결과 조합
+    const result: PendingMakeupTicket[] = tickets.map(ticket => ({
+      id: ticket.id,
+      studentId: ticket.student_id,
+      studentName: studentMap.get(ticket.student_id)?.name || '알 수 없음',
+      displayCode: studentMap.get(ticket.student_id)?.displayCode || '',
+      className: classMap.get(ticket.class_id) || '알 수 없음',
+      classId: ticket.class_id,
+      absenceDate: ticket.absence_date,
+      absenceReason: ticket.absence_reason,
+    }));
+    
+    return { success: true, data: result };
+  } catch (error) {
+    console.error('getPendingMakeupTickets error:', error);
+    return { success: false, error: '보강 대기 목록을 불러오는데 실패했습니다' };
   }
 }
 
@@ -503,91 +627,182 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
       return cached || { success: true, feedId: 'cached' };
     }
     
-    // 기존 피드 확인 (upsert용)
-    const { data: existingFeed } = await supabase
-      .from('student_feeds')
-      .select('id')
-      .eq('tenant_id', profile.tenant_id)
-      .eq('class_id', payload.classId)
-      .eq('student_id', payload.studentId)
-      .eq('feed_date', payload.feedDate)
-      .single();
-    
     let feedId: string;
+    const isRegular = payload.sessionType === 'regular';
+    const isMakeup = payload.sessionType === 'makeup';
     
-    if (existingFeed) {
-      // UPDATE
-      const { error: updateError } = await supabase
+    if (isRegular) {
+      // ========================================
+      // 정규 수업 피드 (기존 로직)
+      // ========================================
+      
+      // 기존 피드 확인 (upsert용)
+      const { data: existingFeed } = await supabase
         .from('student_feeds')
-        .update({
-          attendance_status: payload.attendanceStatus,
-          absence_reason: payload.absenceReason,
-          absence_reason_detail: payload.absenceReasonDetail,
-          notify_parent: payload.notifyParent,
-          is_makeup: payload.isMakeup,
-          needs_makeup: payload.needsMakeup ?? false,
-          progress_text: payload.progressText,
-          memo_values: payload.memoValues || {},
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', existingFeed.id);
-      
-      if (updateError) throw updateError;
-      feedId = existingFeed.id;
-      
-      // 기존 feed_values 삭제
-      await supabase
-        .from('feed_values')
-        .delete()
-        .eq('feed_id', feedId);
-      
-      // 보강 티켓 처리
-      await handleMakeupTicket(supabase, {
-        feedId,
-        tenantId: profile.tenant_id,
-        studentId: payload.studentId,
-        classId: payload.classId,
-        feedDate: payload.feedDate,
-        absenceReason: payload.absenceReason,
-        needsMakeup: payload.needsMakeup ?? false,
-        attendanceStatus: payload.attendanceStatus,
-      });
-        
-    } else {
-      // INSERT
-      const { data: newFeed, error: insertError } = await supabase
-        .from('student_feeds')
-        .insert({
-          tenant_id: profile.tenant_id,
-          class_id: payload.classId,
-          student_id: payload.studentId,
-          feed_date: payload.feedDate,
-          attendance_status: payload.attendanceStatus,
-          absence_reason: payload.absenceReason,
-          absence_reason_detail: payload.absenceReasonDetail,
-          notify_parent: payload.notifyParent,
-          is_makeup: payload.isMakeup,
-          needs_makeup: payload.needsMakeup ?? false,
-          progress_text: payload.progressText,
-          memo_values: payload.memoValues || {},
-        })
         .select('id')
+        .eq('tenant_id', profile.tenant_id)
+        .eq('class_id', payload.classId)
+        .eq('student_id', payload.studentId)
+        .eq('feed_date', payload.feedDate)
+        .eq('session_type', 'regular')
         .single();
       
-      if (insertError) throw insertError;
-      feedId = newFeed.id;
+      if (existingFeed) {
+        // UPDATE
+        const { error: updateError } = await supabase
+          .from('student_feeds')
+          .update({
+            attendance_status: payload.attendanceStatus,
+            absence_reason: payload.absenceReason,
+            absence_reason_detail: payload.absenceReasonDetail,
+            notify_parent: payload.notifyParent,
+            is_makeup: false,
+            needs_makeup: payload.needsMakeup ?? false,
+            progress_text: payload.progressText,
+            memo_values: payload.memoValues || {},
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingFeed.id);
+        
+        if (updateError) throw updateError;
+        feedId = existingFeed.id;
+        
+        // 기존 feed_values 삭제
+        await supabase
+          .from('feed_values')
+          .delete()
+          .eq('feed_id', feedId);
+        
+        // 보강 티켓 처리 (결석 시 티켓 생성/취소)
+        await handleMakeupTicket(supabase, {
+          feedId,
+          tenantId: profile.tenant_id,
+          studentId: payload.studentId,
+          classId: payload.classId,
+          feedDate: payload.feedDate,
+          absenceReason: payload.absenceReason,
+          needsMakeup: payload.needsMakeup ?? false,
+          attendanceStatus: payload.attendanceStatus,
+        });
+          
+      } else {
+        // INSERT
+        const { data: newFeed, error: insertError } = await supabase
+          .from('student_feeds')
+          .insert({
+            tenant_id: profile.tenant_id,
+            class_id: payload.classId,
+            student_id: payload.studentId,
+            feed_date: payload.feedDate,
+            attendance_status: payload.attendanceStatus,
+            absence_reason: payload.absenceReason,
+            absence_reason_detail: payload.absenceReasonDetail,
+            notify_parent: payload.notifyParent,
+            is_makeup: false,
+            needs_makeup: payload.needsMakeup ?? false,
+            progress_text: payload.progressText,
+            memo_values: payload.memoValues || {},
+            session_type: 'regular',
+            is_counted_in_stats: true,
+          })
+          .select('id')
+          .single();
+        
+        if (insertError) throw insertError;
+        feedId = newFeed.id;
+        
+        // 보강 티켓 처리 (결석 시 티켓 생성)
+        await handleMakeupTicket(supabase, {
+          feedId,
+          tenantId: profile.tenant_id,
+          studentId: payload.studentId,
+          classId: payload.classId,
+          feedDate: payload.feedDate,
+          absenceReason: payload.absenceReason,
+          needsMakeup: payload.needsMakeup ?? false,
+          attendanceStatus: payload.attendanceStatus,
+        });
+      }
       
-      // 보강 티켓 처리
-      await handleMakeupTicket(supabase, {
-        feedId,
-        tenantId: profile.tenant_id,
-        studentId: payload.studentId,
-        classId: payload.classId,
-        feedDate: payload.feedDate,
-        absenceReason: payload.absenceReason,
-        needsMakeup: payload.needsMakeup ?? false,
-        attendanceStatus: payload.attendanceStatus,
+    } else {
+      // ========================================
+      // 보강 수업 피드 (신규 로직)
+      // ========================================
+      
+      console.log('Saving makeup feed:', { 
+        studentId: payload.studentId, 
+        makeupTicketId: payload.makeupTicketId,
+        sessionType: payload.sessionType 
       });
+      
+      if (!payload.makeupTicketId) {
+        console.error('makeupTicketId is missing!');
+        return { success: false, error: '보강 티켓 ID가 필요합니다' };
+      }
+      
+      // 이미 이 티켓으로 피드가 있는지 확인
+      const { data: existingMakeupFeed } = await supabase
+        .from('student_feeds')
+        .select('id')
+        .eq('makeup_ticket_id', payload.makeupTicketId)
+        .single();
+      
+      if (existingMakeupFeed) {
+        // UPDATE (이미 보강 피드가 있으면 수정)
+        const { error: updateError } = await supabase
+          .from('student_feeds')
+          .update({
+            attendance_status: payload.attendanceStatus,
+            progress_text: payload.progressText,
+            memo_values: payload.memoValues || {},
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingMakeupFeed.id);
+        
+        if (updateError) throw updateError;
+        feedId = existingMakeupFeed.id;
+        
+        // 기존 feed_values 삭제
+        await supabase
+          .from('feed_values')
+          .delete()
+          .eq('feed_id', feedId);
+          
+      } else {
+        // INSERT (새 보강 피드)
+        const { data: newFeed, error: insertError } = await supabase
+          .from('student_feeds')
+          .insert({
+            tenant_id: profile.tenant_id,
+            class_id: payload.classId,  // 보강 받은 반 (또는 현재 선택된 반)
+            student_id: payload.studentId,
+            feed_date: payload.feedDate,
+            attendance_status: payload.attendanceStatus,
+            absence_reason: null,
+            absence_reason_detail: null,
+            notify_parent: false,
+            is_makeup: true,
+            needs_makeup: false,
+            progress_text: payload.progressText,
+            memo_values: payload.memoValues || {},
+            session_type: 'makeup',
+            is_counted_in_stats: false,  // 보강은 통계 제외
+            makeup_ticket_id: payload.makeupTicketId,
+          })
+          .select('id')
+          .single();
+        
+        if (insertError) throw insertError;
+        feedId = newFeed.id;
+        
+        // 보강 티켓 완료 처리
+        await completeMakeupTicket(
+          supabase,
+          payload.makeupTicketId,
+          payload.feedDate,
+          payload.classId
+        );
+      }
     }
     
     // 피드 값 저장 (결석이 아닐 때만)
