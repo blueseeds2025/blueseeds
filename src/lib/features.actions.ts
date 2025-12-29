@@ -2,8 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { FEATURES, FeatureKey } from './features';
-import { getAuthProfile } from './auth.helpers';
-
+import { getAuthProfile } from './supabase';
 // ============================================================================
 // 서버용 기능 체크 함수
 // ============================================================================

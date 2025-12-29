@@ -1,7 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import { ClassStudent } from './types';
+import { ClassStudent } from '../types';
 
 // ============================================================================
 // 보강 티켓 타입
@@ -154,18 +154,18 @@ export async function getPendingMakeupTickets(): Promise<{
     }
     
     // 학생 정보 조회
-    const studentIds = [...new Set(tickets.map(t => t.student_id))];
+    const studentIds = [...new Set(tickets.map(t => t.student_id).filter((id): id is string => id !== null))];
     const { data: students } = await supabase
       .from('students')
       .select('id, name, display_code')
       .in('id', studentIds);
     
     const studentMap = new Map(
-      (students || []).map(s => [s.id, { name: s.name, displayCode: s.display_code }])
+      (students || []).map(s => [s.id, { name: s.name, displayCode: s.display_code ?? '' }])
     );
     
     // 반 정보 조회
-    const classIds = [...new Set(tickets.map(t => t.class_id))];
+    const classIds = [...new Set(tickets.map(t => t.class_id).filter((id): id is string => id !== null))];
     const { data: classes } = await supabase
       .from('classes')
       .select('id, name')
@@ -176,16 +176,18 @@ export async function getPendingMakeupTickets(): Promise<{
     );
     
     // 결과 조합
-    const result: PendingMakeupTicket[] = tickets.map(ticket => ({
-      id: ticket.id,
-      studentId: ticket.student_id,
-      studentName: studentMap.get(ticket.student_id)?.name || '알 수 없음',
-      displayCode: studentMap.get(ticket.student_id)?.displayCode || '',
-      className: classMap.get(ticket.class_id) || '알 수 없음',
-      classId: ticket.class_id,
-      absenceDate: ticket.absence_date,
-      absenceReason: ticket.absence_reason,
-    }));
+    const result: PendingMakeupTicket[] = tickets
+      .filter(ticket => ticket.student_id && ticket.class_id)
+      .map(ticket => ({
+        id: ticket.id,
+        studentId: ticket.student_id!,
+        studentName: studentMap.get(ticket.student_id!)?.name || '알 수 없음',
+        displayCode: studentMap.get(ticket.student_id!)?.displayCode || '',
+        className: classMap.get(ticket.class_id!) || '알 수 없음',
+        classId: ticket.class_id!,
+        absenceDate: ticket.absence_date,
+        absenceReason: ticket.absence_reason,
+      }));
     
     return { success: true, data: result };
   } catch (error) {
@@ -237,7 +239,9 @@ export async function searchMakeupStudents(
       .eq('is_active', true)
       .is('deleted_at', null);
     
-    const currentIds = currentMembers?.map(m => m.student_id) || [];
+    const currentIds = (currentMembers || [])
+      .map(m => m.student_id)
+      .filter((id): id is string => id !== null);
     
     // 이름으로 검색 (현재 반 학생 제외)
     let searchQuery = supabase
@@ -261,7 +265,7 @@ export async function searchMakeupStudents(
     const students: ClassStudent[] = (data || []).map(s => ({
       id: s.id,
       name: s.name,
-      display_code: s.display_code,
+      display_code: s.display_code ?? '',
       class_id: classId,
       is_makeup: true,
     }));

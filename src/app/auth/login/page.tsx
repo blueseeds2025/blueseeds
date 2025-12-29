@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Loader2 } from 'lucide-react';
-import type { Database } from '@/lib/database.types';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -17,7 +16,7 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   
   const router = useRouter();
-  const supabase = createBrowserClient<Database>(
+  const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
@@ -49,9 +48,9 @@ export default function LoginPage() {
 
       console.log('로그인 유저 ID:', data.user?.id);
       console.log('프로필:', profile);
-      console.log('역할:', profile?.role);
+      console.log('역할:', (profile as any)?.role);
 
-      if (profile?.role === 'owner') {
+      if ((profile as any)?.role === 'owner') {
         router.push('/dashboard/admin');
       } else {
         router.push('/dashboard/teacher');

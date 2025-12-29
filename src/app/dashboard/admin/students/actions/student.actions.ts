@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { revalidatePath } from 'next/cache';
 
-import type { Database } from '@/lib/database.types';
+import type { Database } from '@/lib/supabase/types';
 import type { ActionResult, Student, StudentFormData, StudentWithDetails, StudentEnrollment, ClassInfo } from '../types';
 
 // =======================
@@ -104,10 +104,9 @@ export async function listStudents(): Promise<(Student & { classes: StudentClass
   for (const m of memberships || []) {
     if (!m.class) continue;
     const cls = m.class as any;
-    if (!studentClassMap.has(m.student_id)) {
-      studentClassMap.set(m.student_id, []);
+if (!m.student_id || !studentClassMap.has(m.student_id)) {      studentClassMap.set(m.student_id!, []);
     }
-    studentClassMap.get(m.student_id)!.push({
+   studentClassMap.get(m.student_id!)!.push({
       class_id: cls.id,
       class_name: cls.name,
       class_color: cls.color,

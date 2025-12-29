@@ -34,8 +34,11 @@ export default async function TeacherStudentsPage() {
       .is('deleted_at', null)
       .order('name');
     
-    classes = allClasses || [];
-  } else {
+classes = (allClasses || []).map(c => ({
+  id: c.id,
+  name: c.name,
+  color: c.color ?? '#6366F1',
+}));  } else {
     // 교사는 담당 반만
     const { data: teacherClasses } = await supabase
       .from('class_teachers')
@@ -54,8 +57,11 @@ export default async function TeacherStudentsPage() {
         .is('deleted_at', null)
         .order('name');
       
-      classes = classData || [];
-    }
+classes = (classData || []).map(c => ({
+  id: c.id,
+  name: c.name,
+  color: c.color ?? '#6366F1',
+}));    }
   }
   
   return (

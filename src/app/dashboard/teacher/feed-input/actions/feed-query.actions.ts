@@ -5,9 +5,10 @@ import {
   ClassInfo, 
   ClassStudent,
   FeedOptionSet,
+  FeedOption,
   SavedFeedData,
   TenantSettings
-} from './types';
+} from '../types';
 
 // ============================================================================
 // 교사가 담당하는 반 목록 조회
@@ -52,7 +53,9 @@ export async function getTeacherClasses(): Promise<{
         .eq('is_active', true)
         .is('deleted_at', null);
       
-      const classIds = assignments?.map(a => a.class_id) || [];
+      const classIds = (assignments || [])
+        .map(a => a.class_id)
+        .filter((id): id is string => id !== null);
       
       if (classIds.length === 0) {
         return { success: true, data: [] };
@@ -65,7 +68,14 @@ export async function getTeacherClasses(): Promise<{
     
     if (error) throw error;
     
-    return { success: true, data: data || [] };
+    // color 타입 맞추기: null → undefined
+    const result: ClassInfo[] = (data || []).map(c => ({
+      id: c.id,
+      name: c.name,
+      color: c.color ?? undefined,
+    }));
+    
+    return { success: true, data: result };
   } catch (error) {
     console.error('getTeacherClasses error:', error);
     return { success: false, error: '반 목록을 불러오는데 실패했습니다' };
@@ -119,13 +129,16 @@ export async function getClassStudents(classId: string): Promise<{
     
     const students: ClassStudent[] = (data || [])
       .filter(item => item.students)
-      .map(item => ({
-        id: (item.students as any).id,
-        name: (item.students as any).name,
-        display_code: (item.students as any).display_code,
-        class_id: classId,
-        is_makeup: false,
-      }));
+      .map(item => {
+        const s = item.students as { id: string; name: string; display_code: string | null };
+        return {
+          id: s.id,
+          name: s.name,
+          display_code: s.display_code ?? '',
+          class_id: classId,
+          is_makeup: false,
+        };
+      });
     
     return { success: true, data: students };
   } catch (error) {
@@ -218,15 +231,31 @@ export async function getFeedOptionSets(): Promise<{
       .order('display_order');
 
     // 메모리에서 세트별로 그룹핑
-    const optionsBySetId = (allOptions || []).reduce((acc, opt) => {
-      if (!acc[opt.set_id]) acc[opt.set_id] = [];
-      acc[opt.set_id].push(opt);
-      return acc;
-    }, {} as Record<string, typeof allOptions>);
+    const optionsBySetId: Record<string, FeedOption[]> = {};
+    
+    for (const opt of allOptions || []) {
+      if (!opt.set_id) continue;
+      
+      const feedOption: FeedOption = {
+        id: opt.id,
+        set_id: opt.set_id,
+        label: opt.label,
+        score: opt.score,
+        display_order: opt.display_order ?? 0,
+      };
+      
+      if (!optionsBySetId[opt.set_id]) {
+        optionsBySetId[opt.set_id] = [];
+      }
+      optionsBySetId[opt.set_id].push(feedOption);
+    }
 
     // 결과 조합
     const result: FeedOptionSet[] = filteredSets.map(set => ({
-      ...set,
+      id: set.id,
+      name: set.name,
+      set_key: set.set_key,
+      is_scored: set.is_scored ?? false,
       is_required: set.is_required ?? false,
       options: optionsBySetId[set.id] || [],
     }));
@@ -289,7 +318,7 @@ export async function getSavedFeeds(
     if (feedsError) throw feedsError;
     
     const feedIds = (feeds || []).map(f => f.id);
-    let feedValuesMap: Record<string, any[]> = {};
+    const feedValuesMap: Record<string, { set_id: string | null; option_id: string | null; score: number | null }[]> = {};
     
     if (feedIds.length > 0) {
       const { data: values, error: valuesError } = await supabase
@@ -300,6 +329,7 @@ export async function getSavedFeeds(
       if (valuesError) throw valuesError;
       
       for (const v of values || []) {
+        if (!v.feed_id) continue;
         if (!feedValuesMap[v.feed_id]) {
           feedValuesMap[v.feed_id] = [];
         }
@@ -310,22 +340,26 @@ export async function getSavedFeeds(
     const result: Record<string, SavedFeedData> = {};
     
     for (const feed of feeds || []) {
+      if (!feed.student_id) continue;
+      
       const values = feedValuesMap[feed.id] || [];
       
       result[feed.student_id] = {
         id: feed.id,
-        attendanceStatus: feed.attendance_status as 'present' | 'late' | 'absent',
-        absenceReason: feed.absence_reason,
-        absenceReasonDetail: feed.absence_reason_detail,
+        attendanceStatus: (feed.attendance_status as 'present' | 'late' | 'absent') ?? 'present',
+        absenceReason: feed.absence_reason ?? undefined,
+        absenceReasonDetail: feed.absence_reason_detail ?? undefined,
         notifyParent: feed.notify_parent ?? false,
         isMakeup: feed.is_makeup ?? false,
-        progressText: feed.progress_text,
+        progressText: feed.progress_text ?? undefined,
         memoValues: (feed.memo_values as Record<string, string>) || {},
-        feedValues: values.map(v => ({
-          setId: v.set_id,
-          optionId: v.option_id,
-          score: v.score,
-        })),
+        feedValues: values
+          .filter(v => v.set_id && v.option_id)
+          .map(v => ({
+            setId: v.set_id!,
+            optionId: v.option_id!,
+            score: v.score,
+          })),
       };
     }
     
@@ -377,15 +411,18 @@ export async function getTenantSettings(): Promise<{
       .is('deleted_at', null)
       .or('expires_at.is.null,expires_at.gt.now()');
     
-    const features = featureRows?.map(f => f.feature_key) || [];
-    const settings = tenant?.settings as Record<string, any> || {};
+    const features = (featureRows || [])
+      .map(f => f.feature_key)
+      .filter((key): key is string => key !== null);
+    
+    const settings = (tenant?.settings as Record<string, unknown>) || {};
     
     return {
       success: true,
       data: {
-        progress_enabled: settings.progress_enabled ?? false,
-        materials_enabled: settings.materials_enabled ?? false,
-        makeup_defaults: settings.makeup_defaults ?? {
+        progress_enabled: (settings.progress_enabled as boolean) ?? false,
+        materials_enabled: (settings.materials_enabled as boolean) ?? false,
+        makeup_defaults: (settings.makeup_defaults as Record<string, boolean>) ?? {
           '병결': true,
           '학교행사': true,
           '가사': false,
@@ -480,6 +517,7 @@ export async function getPreviousProgressBatch(
     
     const result: Record<string, string> = {};
     for (const row of data || []) {
+      if (!row.student_id) continue;
       if (!result[row.student_id] && row.progress_text) {
         result[row.student_id] = row.progress_text;
       }

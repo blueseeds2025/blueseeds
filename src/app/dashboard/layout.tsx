@@ -19,7 +19,7 @@ import {
   GraduationCap,
   School
 } from 'lucide-react';
-import type { Database } from '@/lib/database.types';
+import type { Database } from '@/lib/supabase/types';
 
 export default function DashboardLayout({
   children,

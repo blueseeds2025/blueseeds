@@ -15,7 +15,7 @@ export type CardStatus = 'empty' | 'error' | 'dirty' | 'saved';
 export interface ClassInfo {
   id: string;
   name: string;
-  color?: string;
+  color?: string | null;
 }
 
 // 학생 정보
@@ -30,10 +30,10 @@ export interface ClassStudent {
 // 피드 옵션
 export interface FeedOption {
   id: string;
-  set_id: string;
+  set_id: string | null;
   label: string;
   score: number | null;
-  display_order: number;
+  display_order: number | null;
 }
 
 // 피드 옵션 세트
@@ -109,6 +109,9 @@ export interface StudentCardData {
   
   // 저장된 원본 (비교용)
   savedData?: SavedFeedData;
+  
+  // 보강 티켓 ID (보강 수업일 때)
+  makeupTicketId?: string;
 }
 
 // 세션 타입

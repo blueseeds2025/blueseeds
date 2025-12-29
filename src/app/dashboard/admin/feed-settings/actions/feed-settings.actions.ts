@@ -1,6 +1,7 @@
 'use server';
 
-import { supabaseServer, getTenantIdOrThrow } from '@/lib/supabase/actions';
+import { supabaseServer, getTenantIdOrThrow } from '@/lib/supabase';
+import type { Database } from '@/lib/supabase/types';
 import type { FeedConfig, OptionSet, Option, ReportCategory } from '@/types/feed-settings';
 
 // ============================================================================
@@ -40,6 +41,23 @@ interface TemplateSetData {
   score_step?: number | null;
   report_category?: ReportCategory;
   options: { label: string; score: number | null }[];
+}
+
+// Database Insert 타입
+type FeedOptionInsert = Database['public']['Tables']['feed_options']['Insert'];
+type FeedOptionSetInsert = Database['public']['Tables']['feed_option_sets']['Insert'];
+
+// RPC 응답 타입
+interface BulkUpdateOrderResponse {
+  success: boolean;
+  error?: string;
+}
+
+interface ApplyTemplateResponse {
+  success: boolean;
+  sets?: OptionSet[];
+  options?: Record<string, Option[]>;
+  error?: string;
 }
 
 // ============================================================================
@@ -304,19 +322,21 @@ export async function duplicateOptionSet(
     const newName = `${sourceSet.name} (복제)`;
 
     // 새 Set 생성
+    const newSetData: FeedOptionSetInsert = {
+      config_id: configId,
+      tenant_id: tenantId,
+      name: newName,
+      set_key: `${sourceSet.set_key}_copy_${timestamp}`,
+      category: sourceSet.default_report_category ?? 'study',
+      is_scored: sourceSet.is_scored ?? false,
+      score_step: sourceSet.score_step,
+      is_active: true,
+      default_report_category: sourceSet.default_report_category ?? 'study',
+    };
+
     const { data: newSet, error: setError } = await sb
       .from('feed_option_sets')
-      .insert({
-        config_id: configId,
-        tenant_id: tenantId,
-        name: newName,
-        set_key: `${sourceSet.set_key}_copy_${timestamp}`,
-        category: sourceSet.default_report_category ?? 'study',  // default_report_category 사용
-        is_scored: sourceSet.is_scored,
-        score_step: sourceSet.score_step,
-        is_active: true,
-        default_report_category: sourceSet.default_report_category ?? 'study',
-      })
+      .insert(newSetData)
       .select('*')
       .single();
 
@@ -335,14 +355,14 @@ export async function duplicateOptionSet(
     let newOptions: Option[] = [];
 
     if (sourceOptions && sourceOptions.length > 0) {
-      const inserts = sourceOptions.map((o: any, idx: number) => ({
+      const inserts: FeedOptionInsert[] = sourceOptions.map((o, idx) => ({
         set_id: newSet.id,
         tenant_id: tenantId,
         label: o.label,
         score: o.score,
         display_order: idx,
         is_active: true,
-        report_category: o.report_category ?? (sourceSet.default_report_category ?? 'study'),
+        report_category: o.report_category ?? sourceSet.default_report_category ?? 'study',
       }));
 
       const { data: insertedOpts, error: optInsertError } = await sb
@@ -374,19 +394,21 @@ export async function createOptionSet(
     const sb = await supabaseServer();
     const { tenantId } = await getTenantIdOrThrow(sb);
 
+    const insertData: FeedOptionSetInsert = {
+      config_id: params.configId,
+      tenant_id: tenantId,
+      name: params.name,
+      set_key: params.setKey,
+      category: params.category,
+      is_scored: params.isScored,
+      score_step: params.scoreStep,
+      is_active: true,
+      default_report_category: params.category,
+    };
+
     const { data, error } = await sb
       .from('feed_option_sets')
-      .insert({
-        config_id: params.configId,
-        tenant_id: tenantId,
-        name: params.name,
-        set_key: params.setKey,
-        category: params.category,  // 버그 수정: params.name → params.category
-        is_scored: params.isScored,
-        score_step: params.scoreStep,
-        is_active: true,
-        default_report_category: params.category,
-      })
+      .insert(insertData)
       .select('*')
       .single();
 
@@ -465,18 +487,15 @@ export async function createOption(
     const sb = await supabaseServer();
     const { tenantId } = await getTenantIdOrThrow(sb);
 
-    const insertData: Record<string, unknown> = {
+    const insertData: FeedOptionInsert = {
       set_id: params.setId,
       tenant_id: tenantId,
       label: params.label,
       display_order: params.displayOrder,
       is_active: true,
       report_category: params.category,
+      score: params.score,
     };
-
-    if (params.score !== null) {
-      insertData.score = params.score;
-    }
 
     const { data, error } = await sb
       .from('feed_options')
@@ -553,7 +572,7 @@ export async function updateOptionOrder(
 
   try {
     const sb = await supabaseServer();
-    const { tenantId } = await getTenantIdOrThrow(sb); // 버그 수정: destructuring 추가
+    const { tenantId } = await getTenantIdOrThrow(sb);
 
     // RPC로 Bulk Update (1번의 DB 호출)
     const { data, error } = await sb.rpc('bulk_update_option_order', {
@@ -569,8 +588,10 @@ export async function updateOptionOrder(
       throw error;
     }
 
-    if (!data?.success) {
-      throw new Error(data?.error || '순서 변경 실패');
+    // RPC 응답 타입 단언
+    const response = data as unknown as BulkUpdateOrderResponse;
+    if (!response?.success) {
+      throw new Error(response?.error || '순서 변경 실패');
     }
 
     return { ok: true };
@@ -596,11 +617,14 @@ export async function applyTemplate(
     const sb = await supabaseServer();
     const { tenantId } = await getTenantIdOrThrow(sb);
 
+    // JSON으로 변환하여 RPC에 전달
+    const templateJson = JSON.parse(JSON.stringify(templateData));
+
     // RPC 호출 (트랜잭션 처리)
     const { data, error } = await sb.rpc('apply_feed_template', {
       p_config_id: configId,
       p_tenant_id: tenantId,
-      p_template_data: templateData,
+      p_template_data: templateJson,
     });
 
     if (error) {
@@ -608,13 +632,15 @@ export async function applyTemplate(
       throw error;
     }
 
-    if (!data?.success) {
+    // RPC 응답 타입 단언
+    const response = data as unknown as ApplyTemplateResponse;
+    if (!response?.success) {
       return { ok: false, message: '템플릿 적용에 실패했습니다' };
     }
 
     // RPC 결과 파싱
-    const sets: OptionSet[] = data.sets || [];
-    const options: Record<string, Option[]> = data.options || {};
+    const sets: OptionSet[] = response.sets || [];
+    const options: Record<string, Option[]> = response.options || {};
 
     return {
       ok: true,
@@ -650,19 +676,21 @@ export async function applyTemplateFallback(
 
     // 2. 새 Set + Options 생성
     for (const setData of templateData) {
+      const newSetData: FeedOptionSetInsert = {
+        config_id: configId,
+        tenant_id: tenantId,
+        name: setData.name,
+        set_key: `${setData.set_key}_${timestamp}`,
+        category: setData.name,
+        is_scored: setData.is_scored,
+        score_step: setData.score_step ?? null,
+        default_report_category: setData.report_category ?? 'study',
+        is_active: true,
+      };
+
       const { data: newSet, error: setError } = await sb
         .from('feed_option_sets')
-        .insert({
-          config_id: configId,
-          tenant_id: tenantId,
-          name: setData.name,
-          set_key: `${setData.set_key}_${timestamp}`,
-          category: setData.name,
-          is_scored: setData.is_scored,
-          score_step: setData.score_step ?? null,
-          default_report_category: setData.report_category ?? 'study',
-          is_active: true,
-        })
+        .insert(newSetData)
         .select('*')
         .single();
 
@@ -670,7 +698,7 @@ export async function applyTemplateFallback(
 
       // Options Bulk Insert (N+1 해결)
       if (setData.options.length > 0) {
-        const optionInserts = setData.options.map((opt, i) => ({
+        const optionInserts: FeedOptionInsert[] = setData.options.map((opt, i) => ({
           set_id: newSet.id,
           tenant_id: tenantId,
           label: opt.label,
@@ -740,18 +768,18 @@ export async function getTenantSettings(): Promise<ActionResult<TenantSettingsDa
 
     if (error) throw error;
 
-    const settings = (tenant?.settings as Record<string, any>) || {};
+    const settings = (tenant?.settings as Record<string, unknown>) || {};
 
     return {
       ok: true,
       data: {
         basic: {
-          progress_enabled: settings.progress_enabled ?? false,
-          materials_enabled: settings.materials_enabled ?? false,
-          exam_score_enabled: settings.exam_score_enabled ?? false,
+          progress_enabled: (settings.progress_enabled as boolean) ?? false,
+          materials_enabled: (settings.materials_enabled as boolean) ?? false,
+          exam_score_enabled: (settings.exam_score_enabled as boolean) ?? false,
         },
         makeup: {
-          makeup_defaults: settings.makeup_defaults ?? {
+          makeup_defaults: (settings.makeup_defaults as Record<string, boolean>) ?? {
             '병결': true,
             '학교행사': true,
             '가사': false,
@@ -784,7 +812,7 @@ export async function updateBasicSettings(
       .eq('id', tenantId)
       .single();
 
-    const currentSettings = (tenant?.settings as Record<string, any>) || {};
+    const currentSettings = (tenant?.settings as Record<string, unknown>) || {};
 
     // 병합하여 업데이트
     const { error } = await supabase
@@ -824,7 +852,7 @@ export async function updateMakeupSettings(
       .eq('id', tenantId)
       .single();
 
-    const currentSettings = (tenant?.settings as Record<string, any>) || {};
+    const currentSettings = (tenant?.settings as Record<string, unknown>) || {};
 
     // makeup_defaults 업데이트
     const { error } = await supabase

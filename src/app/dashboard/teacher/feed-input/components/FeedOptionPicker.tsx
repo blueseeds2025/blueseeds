@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { FeedOption } from '../types';
 import { filterByChosung } from '../constants';
@@ -79,8 +79,16 @@ export default function FeedOptionPicker({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen, isMobile, onClose]);
 
-  const filteredOptions = filterByChosung(options, searchQuery);
+  // 정렬된 옵션 (display_order null 처리)
+  const sortedOptions = useMemo(() => {
+    return [...options].sort((a, b) => {
+      const orderA = a.display_order ?? 999;
+      const orderB = b.display_order ?? 999;
+      return orderA - orderB;
+    });
+  }, [options]);
 
+const filteredOptions = filterByChosung(sortedOptions, searchQuery) as typeof sortedOptions;
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && filteredOptions.length > 0) {
       e.preventDefault();
@@ -179,7 +187,7 @@ export default function FeedOptionPicker({
                       {option.score !== null && (
                         <span className="text-xs text-[#9CA3AF]">{option.score}점</span>
                       )}
-                      {isSelected && <span className="text-[#6366F1] font-bold">✓</span>}
+                      {isSelected && <span className="text-[#6366F1] font-bold">✔</span>}
                     </span>
                   </button>
                 </li>

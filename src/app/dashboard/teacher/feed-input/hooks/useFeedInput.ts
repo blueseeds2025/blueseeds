@@ -40,6 +40,8 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
       '무단': false,
       '기타': true,
     },
+    plan: 'basic',
+    features: [],
   });
   
   // 보강 티켓 맵 (정규/보강 훅에서 공유)

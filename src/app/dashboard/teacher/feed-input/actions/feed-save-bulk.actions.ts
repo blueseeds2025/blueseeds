@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
-import { SaveFeedPayload, SaveFeedResponse } from '../types';
+import { SaveFeedPayload } from '../types';
 
 // ============================================================================
 // Types
@@ -195,16 +195,16 @@ async function saveRegularFeedsBulk(
   // 기존 피드 맵 생성
   const existingFeedMap = new Map<string, string>();
   existingFeeds?.forEach(f => {
-    existingFeedMap.set(f.student_id, f.id);
+    if (f.student_id) {
+      existingFeedMap.set(f.student_id, f.id);
+    }
   });
   
   // 2. INSERT할 것과 UPDATE할 것 분리
   const toInsert: FeedUpsertData[] = [];
   const toUpdate: { id: string; data: Partial<FeedUpsertData> }[] = [];
-  const payloadMap = new Map<string, SaveFeedPayload>();
   
   for (const payload of payloads) {
-    payloadMap.set(payload.studentId, payload);
     const existingId = existingFeedMap.get(payload.studentId);
     
     const feedData: FeedUpsertData = {
@@ -263,12 +263,14 @@ async function saveRegularFeedsBulk(
       });
     } else {
       inserted?.forEach(f => {
-        insertedFeedIds.set(f.student_id, f.id);
-        results.push({ 
-          studentId: f.student_id, 
-          success: true, 
-          feedId: f.id 
-        });
+        if (f.student_id) {
+          insertedFeedIds.set(f.student_id, f.id);
+          results.push({ 
+            studentId: f.student_id, 
+            success: true, 
+            feedId: f.id 
+          });
+        }
       });
     }
   }
@@ -327,14 +329,14 @@ async function saveRegularFeedsBulk(
     if (!payload.feedValues || payload.feedValues.length === 0) continue;
     
     // feedId 찾기
-    let feedId = existingFeedMap.get(payload.studentId) 
+    const feedId = existingFeedMap.get(payload.studentId) 
       || insertedFeedIds.get(payload.studentId);
     
     if (!feedId) continue;
     
     payload.feedValues.forEach(v => {
       allFeedValues.push({
-        feed_id: feedId!,
+        feed_id: feedId,
         set_id: v.setId,
         option_id: v.optionId,
         score: v.score ?? null,
@@ -460,12 +462,14 @@ async function saveMakeupFeedsBulk(
       });
     } else {
       inserted?.forEach(f => {
-        insertedFeedIds.set(f.student_id, f.id);
-        results.push({ 
-          studentId: f.student_id, 
-          success: true, 
-          feedId: f.id 
-        });
+        if (f.student_id) {
+          insertedFeedIds.set(f.student_id, f.id);
+          results.push({ 
+            studentId: f.student_id, 
+            success: true, 
+            feedId: f.id 
+          });
+        }
       });
     }
   }

@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { revalidatePath } from 'next/cache';
 
-import type { Database } from '@/lib/database.types';
+import type { Database } from '@/lib/supabase/types';
 import type { ActionResult, Class, ClassFormData, ClassTeacher, ClassMember } from '../types';
 
 // =======================
@@ -588,10 +588,8 @@ export async function enrollStudentsBulk(classId: string, studentIds: string[]):
     
     for (const e of existing ?? []) {
       if (e.is_active) {
-        activeIds.add(e.student_id);
-      } else {
-        inactiveIds.add(e.student_id);
-      }
+activeIds.add(e.student_id!);      } else {
+inactiveIds.add(e.student_id!);      }
     }
 
     // 이미 활성 상태인 학생 제외

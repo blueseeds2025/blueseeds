@@ -282,8 +282,7 @@ export async function getMakeupTickets(
       completedAt: t.completed_at,
       completedBy: t.completed_by,
       completionNote: t.completion_note,
-      createdAt: t.created_at,
-    }));
+createdAt: t.created_at || '',    }));
     
     return { success: true, data: result };
   } catch (error) {

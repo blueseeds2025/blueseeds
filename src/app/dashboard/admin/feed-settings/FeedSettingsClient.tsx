@@ -16,7 +16,7 @@ import { PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { createBrowserClient } from '@supabase/ssr';
 import { toast } from 'sonner';
 
-import type { Database } from '@/lib/database.types';
+import type { Database } from '@/lib/supabase/types';
 import type { ReportCategory } from '@/types/feed-settings';
 
 import { DRAG_ACTIVATION_DISTANCE } from './feedSettings.constants';

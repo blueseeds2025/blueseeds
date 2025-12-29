@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { revalidatePath } from 'next/cache';
 
-import type { Database } from '@/lib/database.types';
+import type { Database } from '@/lib/supabase/types';
 import type { ActionResult, Teacher, TeacherWithDetails, FeedPermission, AssignedClass, FeedOptionSet, ClassInfo } from '../types';
 
 // =======================
@@ -163,8 +163,7 @@ export async function getTeacherDetails(teacherId: string): Promise<TeacherWithD
   // 권한 맵 생성
   const permissionMap = new Map<string, { id: string; is_allowed: boolean }>();
   for (const p of permissions ?? []) {
-    permissionMap.set(p.option_set_id, { id: p.id, is_allowed: p.is_allowed });
-  }
+permissionMap.set(p.option_set_id, { id: p.id, is_allowed: p.is_allowed ?? true });  }
 
   // 피드 권한 목록 생성 (전체 항목 기준, 권한 없으면 기본값 true)
   const feedPermissions: FeedPermission[] = (allOptionSets ?? []).map((os: any) => {

@@ -129,6 +129,11 @@ function parseOptionInput(
   return { label, score };
 }
 
+// ActionResult에서 에러 메시지 추출 헬퍼
+function getErrorMessage<T>(result: { ok: false; message: string } | { ok: true; data?: T }, fallback: string): string {
+  return !result.ok ? result.message : fallback;
+}
+
 // ============================================================================
 // Store
 // ============================================================================
@@ -163,7 +168,7 @@ export const useFeedSettingsStore = create<FeedSettingsState>((set, get) => ({
       // 1. Config 확보
       const configResult = await ensureActiveConfig();
       if (!configResult.ok || !configResult.data) {
-        toast.error(configResult.message || '설정을 불러오는데 실패했습니다');
+        toast.error(getErrorMessage(configResult, '설정을 불러오는데 실패했습니다'));
         set({ isLoading: false });
         return;
       }
@@ -172,7 +177,7 @@ export const useFeedSettingsStore = create<FeedSettingsState>((set, get) => ({
       // 2. OptionSets + Options 조회
       const dataResult = await loadOptionSetsWithOptions(cfg.id);
       if (!dataResult.ok || !dataResult.data) {
-        toast.error(dataResult.message || '평가항목을 불러오는데 실패했습니다');
+        toast.error(getErrorMessage(dataResult, '평가항목을 불러오는데 실패했습니다'));
         set({ isLoading: false });
         return;
       }
@@ -351,7 +356,7 @@ export const useFeedSettingsStore = create<FeedSettingsState>((set, get) => ({
     const result = await duplicateOptionSet(sourceSet.id, activeConfig.id);
 
     if (!result.ok || !result.data) {
-      toast.error(result.message);
+      toast.error(getErrorMessage(result, '복제에 실패했습니다'));
       return null;
     }
 
@@ -513,10 +518,9 @@ export const useFeedSettingsStore = create<FeedSettingsState>((set, get) => ({
       label,
       score,
       display_order: maxOrder + 1,
-      is_active: true,
+  is_active: true,
       report_category: category,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      deleted_at: null,
     };
 
     set((state) => ({
@@ -535,7 +539,7 @@ export const useFeedSettingsStore = create<FeedSettingsState>((set, get) => ({
     });
 
     if (!result.ok || !result.data) {
-      toast.error(result.message);
+      toast.error(getErrorMessage(result, '선택지 추가에 실패했습니다'));
       // Rollback
       set((state) => ({
         options: {
@@ -622,7 +626,7 @@ export const useFeedSettingsStore = create<FeedSettingsState>((set, get) => ({
     const result = await applyTemplateAction(activeConfig.id, template.data);
 
     if (!result.ok || !result.data) {
-      toast.error(result.message);
+      toast.error(getErrorMessage(result, '템플릿 적용에 실패했습니다'));
       return;
     }
 
@@ -701,9 +705,9 @@ export const useFeedSettingsStore = create<FeedSettingsState>((set, get) => ({
       if (result.ok && result.data) {
         created = result.data;
         toast.success(`'${attemptName}' 평가항목이 추가되었습니다`);
-      } else if (result.message?.toLowerCase().includes('duplicate')) {
+      } else if (!result.ok && result.message?.toLowerCase().includes('duplicate')) {
         continue;
-      } else {
+      } else if (!result.ok) {
         toast.error(result.message);
         return null;
       }

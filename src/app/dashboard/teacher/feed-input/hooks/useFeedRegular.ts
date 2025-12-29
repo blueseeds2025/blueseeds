@@ -196,7 +196,7 @@ export function useFeedRegular({
       attendanceStatus: status,
       absenceReason: status === 'absent' ? reason : undefined,
       absenceReasonDetail: status === 'absent' && reason === '기타' ? detail : undefined,
-      notifyParent: status === 'absent' && (reason === '무단' || reason === '지각'),
+      notifyParent: status === 'absent' && (reason === '무단'),
       needsMakeup: status === 'absent' ? makeupDefault : false,
     });
   }, [updateCardData, tenantSettings.makeup_defaults]);
@@ -279,7 +279,7 @@ export function useFeedRegular({
         absenceReasonDetail: cardData.absenceReasonDetail,
         notifyParent: cardData.notifyParent,
         isMakeup: isMakeupSession,
-        needsMakeup: cardData.needsMakeup ?? false,
+        needsMakeup: cardData.needsMakeup,
         sessionType: isMakeupSession ? 'makeup' : 'regular',
         makeupTicketId: ticketId,
         progressText: cardData.attendanceStatus !== 'absent' ? cardData.progressText : undefined,
@@ -364,7 +364,7 @@ export function useFeedRegular({
           absenceReasonDetail: cardData.absenceReasonDetail,
           notifyParent: cardData.notifyParent,
           isMakeup: isMakeupSession,
-          needsMakeup: cardData.needsMakeup ?? false,
+          needsMakeup: cardData.needsMakeup,
           sessionType: isMakeupSession ? 'makeup' : 'regular',
           makeupTicketId: ticketId,
           progressText: cardData.attendanceStatus !== 'absent' ? cardData.progressText : undefined,

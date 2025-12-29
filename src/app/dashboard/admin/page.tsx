@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Users, FileText, Calendar, UserX } from 'lucide-react';
-import type { Database } from '@/lib/database.types';
+import type { Database }from '@/lib/supabase/types';
 
 interface TodayAbsent {
   studentId: string;

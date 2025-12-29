@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
-import { SaveFeedPayload, SaveFeedResponse } from './types';
+import { SaveFeedPayload, SaveFeedResponse } from '../types';
 import { handleMakeupTicket, completeMakeupTicket } from './feed-makeup.actions';
 
 // ============================================================================
@@ -37,7 +37,9 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
       .is('deleted_at', null)
       .or('expires_at.is.null,expires_at.gt.now()');
     
-    const enabledFeatures = featureRows?.map(f => f.feature_key) || [];
+    const enabledFeatures = (featureRows || [])
+      .map(f => f.feature_key)
+      .filter((key): key is string => key !== null);
     const hasMakeupSystem = enabledFeatures.includes('makeup_system');
     
     // Idempotency 체크
@@ -49,8 +51,8 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
       .gt('expires_at', new Date().toISOString())
       .single();
     
-    if (existingKey) {
-      const cached = existingKey.response_body as SaveFeedResponse;
+    if (existingKey?.response_body) {
+      const cached = existingKey.response_body as unknown as SaveFeedResponse;
       return cached || { success: true, feedId: 'cached' };
     }
     
@@ -264,8 +266,7 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
         key: payload.idempotencyKey,
         request_path: '/feed/save',
         response_status: 200,
-        response_body: response,
-      });
+response_body: JSON.parse(JSON.stringify(response)),      });
     
     revalidatePath('/dashboard/teacher/feed-input');
     
