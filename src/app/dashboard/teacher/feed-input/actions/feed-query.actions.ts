@@ -182,23 +182,34 @@ export async function getFeedOptionSets(): Promise<{
       }
     }
     
-    const result: FeedOptionSet[] = [];
-    
-    for (const set of filteredSets || []) {
-      const { data: options } = await supabase
-        .from('feed_options')
-        .select('id, set_id, label, score, display_order')
-        .eq('set_id', set.id)
-        .eq('is_active', true)
-        .is('deleted_at', null)
-        .order('display_order');
-      
-      result.push({
-        ...set,
-        is_required: set.is_required ?? false,
-        options: options || [],
-      });
+    // 세트가 없으면 빈 배열 반환
+    if (!filteredSets || filteredSets.length === 0) {
+      return { success: true, data: [] };
     }
+
+    // 옵션 일괄 조회 (N+1 → 1 쿼리로 최적화)
+    const setIds = filteredSets.map(s => s.id);
+    const { data: allOptions } = await supabase
+      .from('feed_options')
+      .select('id, set_id, label, score, display_order')
+      .in('set_id', setIds)
+      .eq('is_active', true)
+      .is('deleted_at', null)
+      .order('display_order');
+
+    // 메모리에서 세트별로 그룹핑
+    const optionsBySetId = (allOptions || []).reduce((acc, opt) => {
+      if (!acc[opt.set_id]) acc[opt.set_id] = [];
+      acc[opt.set_id].push(opt);
+      return acc;
+    }, {} as Record<string, typeof allOptions>);
+
+    // 결과 조합
+    const result: FeedOptionSet[] = filteredSets.map(set => ({
+      ...set,
+      is_required: set.is_required ?? false,
+      options: optionsBySetId[set.id] || [],
+    }));
     
     return { success: true, data: result };
   } catch (error) {
