@@ -1,0 +1,409 @@
+'use client';
+
+import { useState, useCallback, useMemo } from 'react';
+import { toast } from 'sonner';
+import {
+  ClassStudent,
+  FeedOptionSet,
+  StudentCardData,
+  AttendanceStatus,
+  CardStatus,
+  SaveFeedPayload,
+  SavedFeedData,
+  AbsenceReason,
+} from '../types';
+import {
+  getPendingMakeupTickets,
+  searchMakeupStudents,
+  saveFeed,
+  PendingMakeupTicket,
+} from '../actions/feed.actions';
+import { generateIdempotencyKey, TOAST_MESSAGES } from '../constants';
+
+interface UseFeedMakeupProps {
+  classId: string;
+  date: string;
+  optionSets: FeedOptionSet[];
+}
+
+export function useFeedMakeup({ classId, date, optionSets }: UseFeedMakeupProps) {
+  // 보강 대기 목록
+  const [pendingMakeupTickets, setPendingMakeupTickets] = useState<PendingMakeupTicket[]>([]);
+  const [isLoadingMakeupTickets, setIsLoadingMakeupTickets] = useState(false);
+  const [makeupPanelOpen, setMakeupPanelOpen] = useState(false);
+  const [makeupSearchQuery, setMakeupSearchQuery] = useState('');
+  
+  // 보강 전용 상태
+  const [makeupCardDataMap, setMakeupCardDataMap] = useState<Record<string, StudentCardData>>({});
+  const [makeupTicketMap, setMakeupTicketMap] = useState<Record<string, string>>({});
+  
+  // 기존 검색 (하위 호환)
+  const [makeupSearch, setMakeupSearch] = useState('');
+  const [makeupResults, setMakeupResults] = useState<ClassStudent[]>([]);
+  const [isSearchingMakeup, setIsSearchingMakeup] = useState(false);
+  
+  // 저장 상태
+  const [isSaving, setIsSaving] = useState(false);
+  const [savingStudentId, setSavingStudentId] = useState<string | null>(null);
+
+  // 필터된 보강 대기 목록
+  const filteredMakeupTickets = useMemo(() => {
+    return makeupSearchQuery.length >= 1
+      ? pendingMakeupTickets.filter(t => 
+          t.studentName.includes(makeupSearchQuery) ||
+          t.displayCode.includes(makeupSearchQuery)
+        )
+      : pendingMakeupTickets;
+  }, [pendingMakeupTickets, makeupSearchQuery]);
+
+  // 카드 데이터 생성 헬퍼
+  function createMakeupCardData(
+    student: ClassStudent,
+    ticketId: string
+  ): StudentCardData {
+    const feedValues: Record<string, string | null> = {};
+    optionSets.forEach(set => {
+      feedValues[set.id] = null;
+    });
+    
+    return {
+      studentId: student.id,
+      studentName: student.name,
+      isMakeup: true,
+      attendanceStatus: 'present',
+      absenceReason: undefined,
+      absenceReasonDetail: undefined,
+      notifyParent: false,
+      progressText: undefined,
+      previousProgress: undefined,
+      feedValues,
+      memoValues: { 'default': '' },
+      materials: [],
+      status: 'empty',
+      isDirty: false,
+      savedData: undefined,
+      makeupTicketId: ticketId,
+    };
+  }
+
+  // 보강 대기 목록 조회
+  const loadPendingMakeupTickets = useCallback(async () => {
+    setIsLoadingMakeupTickets(true);
+    try {
+      const result = await getPendingMakeupTickets();
+      if (result.success && result.data) {
+        setPendingMakeupTickets(result.data);
+      }
+    } finally {
+      setIsLoadingMakeupTickets(false);
+    }
+  }, []);
+
+  // 보강 패널 열기
+  const openMakeupPanel = useCallback(() => {
+    setMakeupPanelOpen(true);
+    loadPendingMakeupTickets();
+  }, [loadPendingMakeupTickets]);
+
+  // 보강 패널 닫기
+  const closeMakeupPanel = useCallback(() => {
+    setMakeupPanelOpen(false);
+    setMakeupSearchQuery('');
+    setMakeupCardDataMap({});
+    setMakeupTicketMap({});
+  }, []);
+
+  // 보강생 추가 (티켓 기반)
+  const addMakeupStudentFromTicket = useCallback((ticket: PendingMakeupTicket) => {
+    if (makeupCardDataMap[ticket.id]) {
+      toast.info(`${ticket.studentName}은(는) 이미 추가되었습니다`);
+      return;
+    }
+    
+    const student: ClassStudent = {
+      id: ticket.studentId,
+      name: ticket.studentName,
+      display_code: ticket.displayCode,
+      class_id: ticket.classId,
+      is_makeup: true,
+    };
+    
+    const newCardData = createMakeupCardData(student, ticket.id);
+    
+    setMakeupCardDataMap(prev => ({
+      ...prev,
+      [ticket.id]: newCardData,
+    }));
+    
+    setMakeupTicketMap(prev => ({
+      ...prev,
+      [ticket.studentId]: ticket.id,
+    }));
+    
+    toast.success(`${ticket.studentName} 보강생 추가됨`);
+  }, [makeupCardDataMap, optionSets]);
+
+  // 보강 카드 출결 변경
+  const handleMakeupAttendanceChange = useCallback((
+    ticketId: string, 
+    status: AttendanceStatus, 
+    reason?: string, 
+    detail?: string
+  ) => {
+    setMakeupCardDataMap(prev => {
+      const cardData = prev[ticketId];
+      if (!cardData) return prev;
+      
+      return {
+        ...prev,
+        [ticketId]: {
+          ...cardData,
+          attendanceStatus: status,
+          absenceReason: reason as AbsenceReason | undefined,
+          absenceReasonDetail: detail,
+          isDirty: true,
+          status: 'dirty' as CardStatus,
+        },
+      };
+    });
+  }, []);
+
+  // 보강 카드 진도 변경
+  const handleMakeupProgressChange = useCallback((ticketId: string, progress: string) => {
+    setMakeupCardDataMap(prev => {
+      const cardData = prev[ticketId];
+      if (!cardData) return prev;
+      
+      return {
+        ...prev,
+        [ticketId]: {
+          ...cardData,
+          progressText: progress,
+          isDirty: true,
+          status: 'dirty' as CardStatus,
+        },
+      };
+    });
+  }, []);
+
+  // 보강 카드 메모 변경
+  const handleMakeupMemoChange = useCallback((ticketId: string, memoId: string, value: string) => {
+    setMakeupCardDataMap(prev => {
+      const cardData = prev[ticketId];
+      if (!cardData) return prev;
+      
+      return {
+        ...prev,
+        [ticketId]: {
+          ...cardData,
+          memoValues: {
+            ...cardData.memoValues,
+            [memoId]: value,
+          },
+          isDirty: true,
+          status: 'dirty' as CardStatus,
+        },
+      };
+    });
+  }, []);
+
+  // 보강 카드 피드 값 변경
+  const handleMakeupFeedValueChange = useCallback((ticketId: string, setId: string, optionId: string) => {
+    setMakeupCardDataMap(prev => {
+      const cardData = prev[ticketId];
+      if (!cardData) return prev;
+      
+      return {
+        ...prev,
+        [ticketId]: {
+          ...cardData,
+          feedValues: {
+            ...cardData.feedValues,
+            [setId]: optionId,
+          },
+          isDirty: true,
+          status: 'dirty' as CardStatus,
+        },
+      };
+    });
+  }, []);
+
+  // 보강 피드 저장 (단일)
+  const handleMakeupSave = useCallback(async (ticketId: string) => {
+    const cardData = makeupCardDataMap[ticketId];
+    if (!cardData) return;
+    
+    if (cardData.status === 'error') {
+      toast.error(TOAST_MESSAGES.REQUIRED_MISSING);
+      return;
+    }
+    
+    setSavingStudentId(ticketId);
+    
+    try {
+      const payload: SaveFeedPayload = {
+        studentId: cardData.studentId,
+        classId: classId,
+        feedDate: date,
+        attendanceStatus: cardData.attendanceStatus,
+        absenceReason: undefined,
+        absenceReasonDetail: undefined,
+        notifyParent: false,
+        isMakeup: true,
+        needsMakeup: false,
+        sessionType: 'makeup',
+        makeupTicketId: ticketId,
+        progressText: cardData.progressText,
+        memoValues: cardData.memoValues,
+        feedValues: cardData.attendanceStatus !== 'absent'
+          ? Object.entries(cardData.feedValues)
+              .filter(([_, optionId]) => optionId)
+              .map(([setId, optionId]) => ({ setId, optionId: optionId! }))
+          : [],
+        idempotencyKey: generateIdempotencyKey(),
+      };
+      
+      const result = await saveFeed(payload);
+      
+      if (result.success) {
+        toast.success(TOAST_MESSAGES.SAVE_SUCCESS);
+        setMakeupCardDataMap(prev => ({
+          ...prev,
+          [ticketId]: {
+            ...prev[ticketId],
+            status: 'saved' as CardStatus,
+            isDirty: false,
+          },
+        }));
+      } else {
+        toast.error(result.error || TOAST_MESSAGES.SAVE_ERROR);
+      }
+    } catch (error) {
+      console.error('Makeup save error:', error);
+      toast.error(TOAST_MESSAGES.SAVE_ERROR);
+    } finally {
+      setSavingStudentId(null);
+    }
+  }, [makeupCardDataMap, classId, date]);
+
+  // 보강 피드 전체 저장
+  const handleMakeupSaveAll = useCallback(async () => {
+    const dirtyCards = Object.entries(makeupCardDataMap).filter(
+      ([_, card]) => card.isDirty || card.status === 'dirty'
+    );
+    
+    if (dirtyCards.length === 0) {
+      toast.info('저장할 변경사항이 없습니다');
+      return;
+    }
+    
+    setIsSaving(true);
+    
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (const [ticketId, cardData] of dirtyCards) {
+      try {
+        const payload: SaveFeedPayload = {
+          studentId: cardData.studentId,
+          classId: classId,
+          feedDate: date,
+          attendanceStatus: cardData.attendanceStatus,
+          absenceReason: undefined,
+          absenceReasonDetail: undefined,
+          notifyParent: false,
+          isMakeup: true,
+          needsMakeup: false,
+          sessionType: 'makeup',
+          makeupTicketId: ticketId,
+          progressText: cardData.progressText,
+          memoValues: cardData.memoValues,
+          feedValues: cardData.attendanceStatus !== 'absent'
+            ? Object.entries(cardData.feedValues)
+                .filter(([_, optionId]) => optionId)
+                .map(([setId, optionId]) => ({ setId, optionId: optionId! }))
+            : [],
+          idempotencyKey: generateIdempotencyKey(),
+        };
+        
+        const result = await saveFeed(payload);
+        
+        if (result.success) {
+          successCount++;
+          setMakeupCardDataMap(prev => ({
+            ...prev,
+            [ticketId]: {
+              ...prev[ticketId],
+              status: 'saved' as CardStatus,
+              isDirty: false,
+            },
+          }));
+        } else {
+          failCount++;
+        }
+      } catch {
+        failCount++;
+      }
+    }
+    
+    setIsSaving(false);
+    
+    if (failCount === 0) {
+      toast.success(`${successCount}명 보강 저장 완료`);
+    } else {
+      toast.warning(`${successCount}명 저장, ${failCount}명 실패`);
+    }
+  }, [makeupCardDataMap, classId, date]);
+
+  // 기존 보강생 검색 (하위 호환)
+  const searchMakeup = useCallback(async (query: string) => {
+    if (query.length < 2) {
+      setMakeupResults([]);
+      return;
+    }
+    
+    setIsSearchingMakeup(true);
+    const result = await searchMakeupStudents(classId, query);
+    if (result.success && result.data) {
+      setMakeupResults(result.data);
+    }
+    setIsSearchingMakeup(false);
+  }, [classId]);
+
+  return {
+    // 보강 대기 목록
+    pendingMakeupTickets: filteredMakeupTickets,
+    isLoadingMakeupTickets,
+    makeupPanelOpen,
+    makeupSearchQuery,
+    setMakeupSearchQuery,
+    openMakeupPanel,
+    closeMakeupPanel,
+    addMakeupStudentFromTicket,
+    loadPendingMakeupTickets,
+    
+    // 보강 전용 상태 및 핸들러
+    makeupCardDataMap,
+    makeupTicketMap,
+    handleMakeupAttendanceChange,
+    handleMakeupProgressChange,
+    handleMakeupMemoChange,
+    handleMakeupFeedValueChange,
+    handleMakeupSave,
+    handleMakeupSaveAll,
+    makeupDirtyCount: Object.values(makeupCardDataMap).filter(
+      c => c.isDirty || c.status === 'dirty'
+    ).length,
+    
+    // 저장 상태
+    isSaving,
+    savingStudentId,
+    
+    // 기존 검색 (하위 호환)
+    makeupSearch,
+    setMakeupSearch,
+    makeupResults,
+    isSearchingMakeup,
+    searchMakeup,
+  };
+}

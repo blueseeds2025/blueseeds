@@ -12,43 +12,49 @@ import {
   FolderOpen,
   Trash2,
 } from 'lucide-react';
-
 import { PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
-
 import { createBrowserClient } from '@supabase/ssr';
-import type { Database } from '@/lib/database.types';
-import BasicSettingsSection from './components/BasicSettingsSection';
+import { toast } from 'sonner';
 
+import type { Database } from '@/lib/database.types';
 import type { ReportCategory } from '@/types/feed-settings';
+
 import { DRAG_ACTIVATION_DISTANCE } from './feedSettings.constants';
+import { feedStyles } from '@/styles/feedSettings.styles';
+
+// UI Components
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-import { toast } from 'sonner';
-
-import { feedStyles } from '@/styles/feedSettings.styles';
-
-// Hooks
-import { useFeedData } from './hooks/useFeedData';
-import { usePresetUI } from './hooks/usePresetUI';
-import { usePresetList } from './hooks/usePresetList';
-import { useConfirmDialog } from './hooks/useConfirmDialog';
-
-// Components
+// Page Components
+import BasicSettingsSection from './components/BasicSettingsSection';
+import MakeupSettingsSection from './components/MakeupSettingsSection';
 import OptionSetCard from './components/OptionSetCard';
 import PresetListModal from './components/PresetListModal';
 import PresetSaveModal from './components/PresetSaveModal';
 import TemplateSelectModal from './components/TemplateSelectModal';
 import AddItemForm from './components/AddItemForm';
 import { ScoringWizardModal } from './components/WizardModals';
-import MakeupSettingsSection from './components/MakeupSettingsSection';
+
+// Store & Hooks
+import { useFeedSettingsStore } from './stores/useFeedSettingsStore';
+// Note: Zustand 설치 필요 - npm install zustand
+import { useFeedUI } from './hooks/useFeedUI';
+import { usePresetUI } from './hooks/usePresetUI';
+import { usePresetList } from './hooks/usePresetList';
+import { useConfirmDialog } from './hooks/useConfirmDialog';
+
+// ============================================================================
+// Constants
+// ============================================================================
 
 const presetStorageKey = (tenantId: string) => `feed_last_preset_name:${tenantId}`;
 
-// =======================
-// Empty State - 템플릿 선택 화면
-// =======================
+// ============================================================================
+// Empty State Component
+// ============================================================================
+
 type EmptyStateProps = {
   onSelectTemplate: (key: 'custom' | 'basic' | 'english' | 'text') => void;
 };
@@ -108,11 +114,12 @@ function EmptyState({ onSelectTemplate }: EmptyStateProps) {
   );
 }
 
-// =======================
-// Page
-// =======================
+// ============================================================================
+// Main Component
+// ============================================================================
+
 export default function FeedSettingsClient() {
-  // Supabase client
+  // ========== Supabase & DnD ==========
   const supabase = useMemo(
     () =>
       createBrowserClient<Database>(
@@ -122,24 +129,51 @@ export default function FeedSettingsClient() {
     []
   );
 
-  // DnD sensors
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } })
   );
 
-  // =======================
-  // Helpers
-  // =======================
-  const toastLoadFail = () => toast.error('불러오기에 실패했습니다. 잠시 후 다시 시도해주세요.', { duration: 4000 });
-  const toastSaveFail = () => toast.error('저장에 실패했습니다. 잠시 후 다시 시도해주세요.', { duration: 4000 });
+  // ========== Store ==========
+  const {
+    optionSets,
+    options,
+    categoryDraft,
+    currentTemplate,
+    isLoading,
+    showWizard,
+    wizardStep,
+    loadData,
+    toggleSetActive,
+    deleteSet,
+    updateSetName,
+    changeSetCategory,
+    duplicateSet,
+    handleOptionDragEnd,
+    updateOption,
+    deleteOption,
+    addOptionFromInput,
+    archiveAllCurrentSets,
+    applyTemplate,
+    setCustomTemplate,
+    addItemWithTemplate,
+    setShowWizard,
+    setWizardStep,
+    setCurrentTemplate,
+  } = useFeedSettingsStore();
 
-  // =======================
-  // Tenant ID 캐싱
-  // =======================
+  // ========== UI Hook ==========
+  const ui = useFeedUI();
+
+  // ========== Confirm Dialog ==========
+  const { confirm, ConfirmDialog } = useConfirmDialog();
+
+  // ========== Feature Flags ==========
+  const [hasMakeupSystem, setHasMakeupSystem] = useState(false);
+
+  // ========== Tenant ID ==========
   const [cachedTenantId, setCachedTenantId] = useState<string | null>(null);
 
   const getTenantId = useCallback(async (): Promise<string | null> => {
-    // 이미 캐싱되어 있으면 바로 반환
     if (cachedTenantId) return cachedTenantId;
 
     const { data: { user } } = await supabase.auth.getUser();
@@ -152,74 +186,11 @@ export default function FeedSettingsClient() {
       .single();
 
     if (error || !profile?.tenant_id) return null;
-    
-    // 캐싱
     setCachedTenantId(profile.tenant_id);
     return profile.tenant_id;
   }, [supabase, cachedTenantId]);
 
-  // =======================
-  // UI State
-  // =======================
-  const [expandedSets, setExpandedSets] = useState<Set<string>>(new Set());
-  const [isEditMode, setIsEditMode] = useState(false);
-  const [optionDraft, setOptionDraft] = useState<Record<string, string>>({});
-  const [editingSetId, setEditingSetId] = useState<string | null>(null);
-  const [editingSetName, setEditingSetName] = useState('');
-  const [newlyCreatedSetId, setNewlyCreatedSetId] = useState<string | null>(null); // 방금 생성된 세트 ID
-  
-  // Feature flag state
-  const [hasMakeupSystem, setHasMakeupSystem] = useState(false);
-
-  // Add item form state
-  const [isAddingItem, setIsAddingItem] = useState(false);
-  const [newItemName, setNewItemName] = useState('');
-  const [newItemCategory, setNewItemCategory] = useState<ReportCategory | null>(null);
-
-  // Template select modal state
-  const [showTemplateModal, setShowTemplateModal] = useState(false);
-  const [pendingItemName, setPendingItemName] = useState('');
-
-  // =======================
-  // Data Hook
-  // =======================
-  const {
-    activeConfig,
-    optionSets,
-    options,
-    categoryDraft,
-    currentTemplate,
-    setCurrentTemplate,
-    showWizard,
-    setShowWizard,
-    wizardStep,
-    setWizardStep,
-    isLoading,
-    loadOptionSets,
-    handleOptionDragEnd,
-    updateOption,
-    deleteOption,
-    addOptionFromInput,
-    toggleSetActive,
-    deleteSet,
-    updateSetName,
-    changeSetCategory,
-    duplicateSet,
-    applyTemplate,
-    setCustomTemplate,
-    addItemWithTemplate,
-    archiveAllCurrentSets,
-  } = useFeedData({
-    supabase,
-    getTenantId,
-    setExpandedSets,
-    toastLoadFail,
-    toastSaveFail,
-  });
-
-  // =======================
-  // Preset Hooks
-  // =======================
+  // ========== Preset Hooks ==========
   const {
     showPresetModal,
     setShowPresetModal,
@@ -243,36 +214,22 @@ export default function FeedSettingsClient() {
     clearLastAppliedPreset,
   } = usePresetList({
     getTenantId,
-    loadOptionSets,
+    loadOptionSets: loadData,
     presetStorageKey,
     beforeApply: () => {
       setShowWizard(false);
-      setShowTemplateModal(false);
-      setIsAddingItem(false);
+      ui.closeTemplateModal();
+      ui.closeAddItemForm();
       setShowPresetModal(false);
       setPresetName('');
     },
   });
 
-  // =======================
-  // Confirm Dialog
-  // =======================
-  const { confirm, ConfirmDialog } = useConfirmDialog();
-
-  // =======================
-  // Effects
-  // =======================
+  // ========== Effects ==========
   useEffect(() => {
-    setShowPresetModal(false);
-    setShowTemplateModal(false);
-    setIsAddingItem(false);
-    setPresetName('');
-    setPendingItemName('');
-    setNewItemName('');
-    setNewItemCategory(null);
-  }, [setShowPresetModal, setPresetName]);
+    void loadData();
+  }, [loadData]);
 
-  // Feature flags 로드
   useEffect(() => {
     const loadFeatures = async () => {
       const tenantId = await getTenantId();
@@ -291,139 +248,92 @@ export default function FeedSettingsClient() {
     loadFeatures();
   }, [supabase, getTenantId]);
 
-  useEffect(() => {
-    if (!showPresetModal) return;
+  // ========== Handlers ==========
+  const handleUpdateSetName = useCallback(async (setId: string) => {
+    const success = await updateSetName(setId, ui.editingSetName);
+    if (success) {
+      ui.cancelEditingSetName();
+    }
+  }, [updateSetName, ui]);
 
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setShowPresetModal(false);
-        setPresetName('');
-      }
-    };
+  const handleChangeSetCategory = useCallback(async (
+    set: typeof optionSets[0],
+    newCategory: ReportCategory
+  ) => {
+    const success = await changeSetCategory(set, newCategory);
+    if (success) {
+      ui.setIsEditMode(false);
+    }
+  }, [changeSetCategory, ui]);
 
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showPresetModal, setShowPresetModal, setPresetName]);
+  const handleDuplicateSet = useCallback(async (set: typeof optionSets[0]) => {
+    const newSet = await duplicateSet(set);
+    if (newSet) {
+      ui.startEditingSetName(newSet.id, `${set.name} (복제)`);
+    }
+  }, [duplicateSet, ui]);
 
-  // =======================
-  // Handlers
-  // =======================
-  const handleUpdateSetName = useCallback(
-    async (setId: string) => {
-      const success = await updateSetName(setId, editingSetName);
-      if (success) {
-        setEditingSetId(null);
-        setEditingSetName('');
-      }
-    },
-    [editingSetName, updateSetName]
-  );
+  const handleDeleteSet = useCallback(async (set: typeof optionSets[0]) => {
+    const ok = await confirm({
+      title: '평가항목 삭제',
+      description: `"${set.name}" 세트를 삭제할까요?\n\n세트는 보관(archived) 처리되고, 포함된 선택지도 비활성화됩니다.\n\n※ 기존에 기록된 리포트 데이터는 삭제되지 않습니다.`,
+      confirmLabel: '삭제',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    await deleteSet(set.id);
+  }, [confirm, deleteSet]);
 
-  const handleChangeSetCategory = useCallback(
-    async (set: typeof optionSets[0], newCategory: ReportCategory) => {
-      const success = await changeSetCategory(set, newCategory);
-      if (success) {
-        setIsEditMode(false);
-      }
-    },
-    [changeSetCategory]
-  );
-
-  const handleDuplicateSet = useCallback(
-    async (set: typeof optionSets[0]) => {
-      const newSet = await duplicateSet(set);
-      if (newSet) {
-        setEditingSetId(newSet.id);
-        setEditingSetName(`${set.name} (복제)`);
-      }
-    },
-    [duplicateSet]
-  );
-
-  const handleDeleteSet = useCallback(
-    async (set: typeof optionSets[0]) => {
-      const ok = await confirm({
-        title: '평가항목 삭제',
-        description: `"${set.name}" 세트를 삭제할까요?\n\n세트는 보관(archived) 처리되고, 포함된 선택지도 비활성화됩니다.\n\n※ 기존에 기록된 리포트 데이터는 삭제되지 않습니다.`,
-        confirmLabel: '삭제',
-        variant: 'danger',
-      });
-      if (!ok) return;
-
-      await deleteSet(set.id);
-    },
-    [confirm, deleteSet]
-  );
-
-  const addNewItem = useCallback(async () => {
-    if (!newItemName.trim()) {
+  const handleAddNewItem = useCallback(async () => {
+    if (!ui.newItemName.trim()) {
       toast.error('평가항목명을 입력하세요');
       return;
     }
-    if (!newItemCategory) {
+    if (!ui.newItemCategory) {
       toast.error('AI 리포트 영역을 먼저 선택해주세요');
       return;
     }
     if (!currentTemplate) {
-      setPendingItemName(newItemName);
-      setShowTemplateModal(true);
+      ui.openTemplateModal(ui.newItemName);
       return;
     }
 
-    const created = await addItemWithTemplate(currentTemplate, newItemName, newItemCategory);
+    const created = await addItemWithTemplate(currentTemplate, ui.newItemName, ui.newItemCategory);
     if (created) {
-      setNewItemName('');
-      setNewItemCategory(null);
-      setIsAddingItem(false);
-      setNewlyCreatedSetId(created.id); // 새로 생성된 세트 ID 저장
-      
-      // 새로 만든 카드로 스크롤
+      ui.closeAddItemForm();
+      ui.markAsNewlyCreated(created.id);
       setTimeout(() => {
-        document.getElementById(`option-set-${created.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        document.getElementById(`option-set-${created.id}`)?.scrollIntoView({ 
+          behavior: 'smooth', 
+          block: 'center' 
+        });
       }, 100);
     }
-  }, [addItemWithTemplate, currentTemplate, newItemCategory, newItemName]);
+  }, [addItemWithTemplate, currentTemplate, ui]);
 
-  const handleTemplateSelect = useCallback(
-    async (template: 'precise' | 'general' | 'text') => {
-      const name = pendingItemName || newItemName;
-      const category = newItemCategory;
+  const handleTemplateSelect = useCallback(async (template: 'precise' | 'general' | 'text') => {
+    const name = ui.pendingItemName || ui.newItemName;
+    const category = ui.newItemCategory;
 
-      if (!name.trim()) {
-        toast.error('평가항목명을 입력하세요');
-        setShowTemplateModal(false);
-        return;
-      }
-      if (!category) {
-        toast.error('AI 리포트 영역을 먼저 선택해주세요');
-        setShowTemplateModal(false);
-        return;
-      }
+    if (!name.trim()) {
+      toast.error('평가항목명을 입력하세요');
+      ui.closeTemplateModal();
+      return;
+    }
+    if (!category) {
+      toast.error('AI 리포트 영역을 먼저 선택해주세요');
+      ui.closeTemplateModal();
+      return;
+    }
 
-      const created = await addItemWithTemplate(template, name, category);
-      if (created) {
-        setPendingItemName('');
-        setNewItemName('');
-        setNewItemCategory(null);
-        setIsAddingItem(false);
-        setShowTemplateModal(false);
-      }
-    },
-    [addItemWithTemplate, newItemCategory, newItemName, pendingItemName]
-  );
-
-  const toggleExpand = useCallback((setId: string) => {
-    setShowPresetListModal(false);
-    setExpandedSets((prev) => {
-      const next = new Set(prev);
-      if (next.has(setId)) next.delete(setId);
-      else next.add(setId);
-      return next;
-    });
-  }, [setShowPresetListModal]);
+    const created = await addItemWithTemplate(template, name, category);
+    if (created) {
+      ui.closeTemplateModal();
+      ui.closeAddItemForm();
+    }
+  }, [addItemWithTemplate, ui]);
 
   const handleResetSettings = useCallback(async () => {
-    // 모달로 확인
     const ok = await confirm({
       title: '전체 삭제',
       description: '기존 설정이 모두 삭제(보관)됩니다.\n계속하시겠습니까?',
@@ -435,45 +345,22 @@ export default function FeedSettingsClient() {
     const archived = await archiveAllCurrentSets();
     if (!archived) return;
 
-    // ✅ localStorage에서 마지막 적용 프리셋명 제거
     await clearLastAppliedPreset();
-
-    setShowWizard(false); // EmptyState 보이게
-    setIsAddingItem(false);
+    setShowWizard(false);
+    ui.closeAddItemForm();
     setCurrentTemplate(null);
-    setNewItemName('');
-    setPendingItemName('');
-    setNewItemCategory(null);
-  }, [archiveAllCurrentSets, clearLastAppliedPreset, confirm, setCurrentTemplate, setShowWizard]);
+  }, [archiveAllCurrentSets, clearLastAppliedPreset, confirm, setCurrentTemplate, setShowWizard, ui]);
 
-  const handleCancelAddItem = useCallback(() => {
-    setIsAddingItem(false);
-    setNewItemName('');
-    setNewItemCategory(null);
-  }, []);
+  const handleEmptyTemplateSelect = useCallback((key: 'custom' | 'basic' | 'english' | 'text') => {
+    if (key === 'custom') {
+      setShowWizard(true);
+      setWizardStep('scoring');
+    } else {
+      void applyTemplate(key);
+    }
+  }, [applyTemplate, setShowWizard, setWizardStep]);
 
-  // =======================
-  // Empty State Handler
-  // =======================
-  const handleEmptyTemplateSelect = useCallback(
-    (key: 'custom' | 'basic' | 'english' | 'text') => {
-      if (key === 'custom') {
-        // 직접 만들기 → scoring 선택으로
-        setShowWizard(true);
-        setWizardStep('scoring');
-      } else {
-        // 템플릿 적용
-        void applyTemplate(key);
-      }
-    },
-    [applyTemplate, setShowWizard, setWizardStep]
-  );
-
-  // =======================
-  // Render
-  // =======================
-
-  // 로딩 중일 때
+  // ========== Render ==========
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -482,31 +369,23 @@ export default function FeedSettingsClient() {
     );
   }
 
-  // 데이터가 없고, 위저드도 안 보이고, 템플릿도 선택 안 됐으면 EmptyState
   if (optionSets.length === 0 && !showWizard && !currentTemplate) {
     return <EmptyState onSelectTemplate={handleEmptyTemplateSelect} />;
   }
 
-  // 데이터가 있거나 위저드 진행중이면 기존 UI
   return (
     <div className={feedStyles.layout.page}>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        {/* 좌측: 제목 + 모드 배지 */}
         <div className="flex items-center gap-3">
           <h1 className={feedStyles.text.pageTitle}>피드 설정</h1>
           {currentTemplate && (
             <span className="px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded">
-              {currentTemplate === 'text'
-                ? '문장형'
-                : currentTemplate === 'precise'
-                ? '5점 단위'
-                : '10점 단위'}
+              {currentTemplate === 'text' ? '문장형' : currentTemplate === 'precise' ? '5점 단위' : '10점 단위'}
             </span>
           )}
         </div>
 
-        {/* 우측: 설정 관리 버튼들 */}
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
@@ -537,28 +416,25 @@ export default function FeedSettingsClient() {
           </Button>
         </div>
       </div>
-{/* 평가항목 섹션 */}
+
+      {/* 평가항목 섹션 */}
       <Card id="feed-option-section" className="mb-6 border-[#E8E5E0]">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle className="text-base font-semibold text-[#37352F]">
-                평가항목
-              </CardTitle>
-              <p className="text-sm text-[#9B9A97] mt-1">
-                학생 피드에 기록할 평가항목을 설정하세요
-              </p>
+              <CardTitle className="text-base font-semibold text-[#37352F]">평가항목</CardTitle>
+              <p className="text-sm text-[#9B9A97] mt-1">학생 피드에 기록할 평가항목을 설정하세요</p>
             </div>
             <div className="flex items-center gap-2 text-sm text-gray-600">
               <span>AI 매핑</span>
-              <Switch 
-                checked={isEditMode} 
-                onCheckedChange={(v) => setIsEditMode(Boolean(v))}
+              <Switch
+                checked={ui.isEditMode}
+                onCheckedChange={(v) => ui.setIsEditMode(Boolean(v))}
                 className="data-[state=checked]:bg-[#6366F1]"
               />
             </div>
           </div>
-          {isEditMode && (
+          {ui.isEditMode && (
             <div className="mt-3 flex items-center gap-2 text-sm text-[#9B9A97]">
               <Info className={feedStyles.icon.small} />
               각 평가항목의 AI 리포트 영역(학습/태도/출결/없음)을 변경할 수 있습니다.
@@ -569,7 +445,7 @@ export default function FeedSettingsClient() {
           {/* 평가항목 추가 버튼 */}
           <Button
             onClick={() => {
-              setIsAddingItem(true);
+              ui.openAddItemForm();
               setShowWizard(false);
             }}
             variant="outline"
@@ -587,87 +463,66 @@ export default function FeedSettingsClient() {
           )}
 
           {/* Add item form */}
-          {isAddingItem && (
+          {ui.isAddingItem && (
             <AddItemForm
               currentTemplate={currentTemplate}
-              newItemName={newItemName}
-              newItemCategory={newItemCategory}
-              onChangeName={setNewItemName}
-              onChangeCategory={setNewItemCategory}
-              onSubmit={() => void addNewItem()}
-              onCancel={handleCancelAddItem}
+              newItemName={ui.newItemName}
+              newItemCategory={ui.newItemCategory}
+              onChangeName={ui.setNewItemName}
+              onChangeCategory={ui.setNewItemCategory}
+              onSubmit={() => void handleAddNewItem()}
+              onCancel={ui.closeAddItemForm}
             />
           )}
 
           {/* Option Sets */}
-      {optionSets.map((set) => (
-        <OptionSetCard
-          key={set.id}
-          set={set}
-          expanded={expandedSets.has(set.id)}
-          isEditMode={isEditMode}
-          isHighlightAdd={newlyCreatedSetId === set.id}
-          categoryValue={
-            (categoryDraft[set.id] ?? set.default_report_category ?? 'study') as ReportCategory
-          }
-          optionList={options[set.id] ?? []}
-          onToggleExpand={() => toggleExpand(set.id)}
-          onToggleSetActive={() => void toggleSetActive(set)}
-          nameEdit={{
-            editing: editingSetId === set.id,
-            value: editingSetName,
-            onStart: () => {
-              setEditingSetId(set.id);
-              setEditingSetName(set.name);
-            },
-            onChange: (v) => setEditingSetName(v),
-            onConfirm: () => void handleUpdateSetName(set.id),
-            onCancel: () => {
-              setEditingSetId(null);
-              setEditingSetName('');
-            },
-          }}
-          onDuplicate={() => void handleDuplicateSet(set)}
-          onDeleteSet={() => void handleDeleteSet(set)}
-          onChangeCategory={(cat) => void handleChangeSetCategory(set, cat)}
-          confirm={confirm}
-          sensors={sensors}
-          onDragEnd={(event) => void handleOptionDragEnd(set.id, event)}
-          onDeleteOption={(optionId) => void deleteOption(optionId)}
-          onUpdateOption={(optionId, newLabel, newScore) =>
-            void updateOption(optionId, newLabel, newScore)
-          }
-          optionDraft={{
-            value: optionDraft[set.id] ?? '',
-            onChange: (v) =>
-              setOptionDraft((prev) => ({
-                ...prev,
-                [set.id]: v,
-              })),
-            onAdd: () => {
-              const draft = (optionDraft[set.id] ?? '').trim();
-              if (!draft) return;
-
-              // ✅ 입력창 먼저 비우고, 서버 요청은 비동기로
-              setOptionDraft((prev) => ({ ...prev, [set.id]: '' }));
-              void addOptionFromInput(set.id, draft);
-              
-              // 옵션 추가하면 강조 해제
-              if (newlyCreatedSetId === set.id) {
-                setNewlyCreatedSetId(null);
-              }
-            },
-          }}
-        />
-      ))}
+          {optionSets.map((set) => (
+            <OptionSetCard
+              key={set.id}
+              set={set}
+              expanded={ui.expandedSets.has(set.id)}
+              isEditMode={ui.isEditMode}
+              isHighlightAdd={ui.newlyCreatedSetId === set.id}
+              categoryValue={(categoryDraft[set.id] ?? set.default_report_category ?? 'study') as ReportCategory}
+              optionList={options[set.id] ?? []}
+              onToggleExpand={() => ui.toggleExpand(set.id)}
+              onToggleSetActive={() => void toggleSetActive(set)}
+              nameEdit={{
+                editing: ui.editingSetId === set.id,
+                value: ui.editingSetName,
+                onStart: () => ui.startEditingSetName(set.id, set.name),
+                onChange: (v) => ui.setEditingSetName(v),
+                onConfirm: () => void handleUpdateSetName(set.id),
+                onCancel: ui.cancelEditingSetName,
+              }}
+              onDuplicate={() => void handleDuplicateSet(set)}
+              onDeleteSet={() => void handleDeleteSet(set)}
+              onChangeCategory={(cat) => void handleChangeSetCategory(set, cat)}
+              confirm={confirm}
+              sensors={sensors}
+              onDragEnd={(event) => void handleOptionDragEnd(set.id, event)}
+              onDeleteOption={(optionId) => void deleteOption(optionId)}
+              onUpdateOption={(optionId, newLabel, newScore) => void updateOption(optionId, newLabel, newScore)}
+              optionDraft={{
+                value: ui.optionDraft[set.id] ?? '',
+                onChange: (v) => ui.updateOptionDraft(set.id, v),
+                onAdd: () => {
+                  const draft = (ui.optionDraft[set.id] ?? '').trim();
+                  if (!draft) return;
+                  ui.clearOptionDraft(set.id);
+                  void addOptionFromInput(set.id, draft);
+                  if (ui.newlyCreatedSetId === set.id) {
+                    ui.clearNewlyCreated();
+                  }
+                },
+              }}
+            />
+          ))}
         </CardContent>
       </Card>
 
       {/* 기본 항목 설정 */}
-      <BasicSettingsSection 
-        supabase={supabase} 
-        getTenantId={getTenantId} 
-      />
+      <BasicSettingsSection supabase={supabase} getTenantId={getTenantId} />
 
       {/* 결석/보강 설정 */}
       <MakeupSettingsSection
@@ -675,22 +530,18 @@ export default function FeedSettingsClient() {
         getTenantId={getTenantId}
         hasMakeupSystem={hasMakeupSystem}
         onUpgradeClick={() => {
-          // TODO: 업그레이드 안내 모달 또는 페이지로 이동
           toast.info('프리미엄 요금제로 업그레이드하시면 결석/보강 관리 기능을 사용하실 수 있습니다.');
         }}
       />
 
       {/* Modals */}
       <TemplateSelectModal
-        open={showTemplateModal}
-        pendingItemName={pendingItemName}
+        open={ui.showTemplateModal}
+        pendingItemName={ui.pendingItemName}
         onSelectPrecise={() => void handleTemplateSelect('precise')}
         onSelectGeneral={() => void handleTemplateSelect('general')}
         onSelectText={() => void handleTemplateSelect('text')}
-        onClose={() => {
-          setShowTemplateModal(false);
-          setPendingItemName('');
-        }}
+        onClose={ui.closeTemplateModal}
       />
 
       <PresetSaveModal
@@ -715,17 +566,15 @@ export default function FeedSettingsClient() {
         onDelete={(id, name) => void handleDeletePreset(id, name)}
       />
 
-      {/* Scoring 선택 모달 */}
       <ScoringWizardModal
         open={showWizard && wizardStep === 'scoring'}
         onBack={() => setShowWizard(false)}
         onSelectScoring={(key) => {
           void setCustomTemplate(key);
-          setIsAddingItem(true); // 자동으로 평가항목 추가 폼 열기
+          ui.openAddItemForm();
         }}
       />
 
-      {/* Confirm Dialog */}
       <ConfirmDialog />
     </div>
   );
