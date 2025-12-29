@@ -1,6 +1,7 @@
 'use client';
 
 import type { MakeupTicket, DateFilter, StatusFilter } from '../hooks/useMakeupTickets';
+import { formatDateShort } from '@/lib/utils';
 
 // ============================================================================
 // Types
@@ -27,19 +28,6 @@ interface MakeupSectionProps {
   onNoteChange: (ticketId: string, value: string) => void;
   onComplete: (ticketId: string) => void;
   onReopen: (ticketId: string) => void;
-}
-
-// ============================================================================
-// Helper
-// ============================================================================
-
-function formatDate(dateStr: string) {
-  const date = new Date(dateStr);
-  const month = date.getMonth() + 1;
-  const day = date.getDate();
-  const days = ['일', '월', '화', '수', '목', '금', '토'];
-  const dayOfWeek = days[date.getDay()];
-  return `${month}/${day} (${dayOfWeek})`;
 }
 
 // ============================================================================
@@ -192,7 +180,7 @@ export default function MakeupSection({
                     <div className="text-sm text-[#6B7280]">
                       <span>{ticket.className}</span>
                       <span className="mx-1">·</span>
-                      <span>{formatDate(ticket.absenceDate)} 결석</span>
+                      <span>{formatDateShort(ticket.absenceDate)} 결석</span>
                       {ticket.absenceReason && (
                         <>
                           <span className="mx-1">·</span>

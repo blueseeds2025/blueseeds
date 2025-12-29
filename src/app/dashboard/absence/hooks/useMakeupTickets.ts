@@ -2,26 +2,14 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
-import { createBrowserClient } from '@supabase/ssr';
-import { completeTicket, reopenTicket } from '../makeup.actions';
-import type { Database } from '@/lib/database.types';
+import { getMakeupTickets, completeTicket, reopenTicket, type MakeupTicket } from '../makeup.actions';
+import { getTodayString, getDaysAgoString, getMonthStartString } from '@/lib/utils';
 
 // ============================================================================
 // Types
 // ============================================================================
 
-export interface MakeupTicket {
-  id: string;
-  studentId: string;
-  studentName: string;
-  classId: string;
-  className: string;
-  absenceDate: string;
-  absenceReason: string | null;
-  status: 'pending' | 'completed' | 'cancelled';
-  completionNote: string | null;
-}
-
+export type { MakeupTicket } from '../makeup.actions';
 export type DateFilter = 'today' | 'week' | 'month' | 'custom';
 export type StatusFilter = 'pending' | 'completed' | 'all';
 
@@ -38,120 +26,56 @@ export function useMakeupTickets() {
   // Filters
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('pending');
   const [dateFilter, setDateFilter] = useState<DateFilter>('month');
-  const [customStartDate, setCustomStartDate] = useState(() => {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-  });
-  const [customEndDate, setCustomEndDate] = useState(() => {
-    return new Date().toISOString().split('T')[0];
-  });
+  const [customStartDate, setCustomStartDate] = useState(() => getMonthStartString());
+  const [customEndDate, setCustomEndDate] = useState(() => getTodayString());
 
-  const supabase = useMemo(
-    () =>
-      createBrowserClient<Database>(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      ),
-    []
-  );
-
-  // 날짜 범위 계산
+  // 날짜 범위 계산 (로컬 타임존 기준)
   const getDateRange = useCallback(() => {
-    const today = new Date();
+    const today = getTodayString();
     let startDate: string;
     let endDate: string;
 
     switch (dateFilter) {
       case 'today':
-        startDate = today.toISOString().split('T')[0];
-        endDate = startDate;
+        startDate = today;
+        endDate = today;
         break;
       case 'week':
-        const weekAgo = new Date(today);
-        weekAgo.setDate(today.getDate() - 6);
-        startDate = weekAgo.toISOString().split('T')[0];
-        endDate = today.toISOString().split('T')[0];
+        startDate = getDaysAgoString(6);
+        endDate = today;
         break;
       case 'month':
-        startDate = new Date(today.getFullYear(), today.getMonth(), 1)
-          .toISOString()
-          .split('T')[0];
-        endDate = today.toISOString().split('T')[0];
+        startDate = getMonthStartString();
+        endDate = today;
         break;
       case 'custom':
         startDate = customStartDate;
         endDate = customEndDate;
         break;
       default:
-        startDate = new Date(today.getFullYear(), today.getMonth(), 1)
-          .toISOString()
-          .split('T')[0];
-        endDate = today.toISOString().split('T')[0];
+        startDate = getMonthStartString();
+        endDate = today;
     }
 
     return { startDate, endDate };
   }, [dateFilter, customStartDate, customEndDate]);
 
-  // 티켓 로드
+  // 티켓 로드 (Server Action 사용)
   const loadTickets = useCallback(async () => {
     setIsLoading(true);
 
     const { startDate, endDate } = getDateRange();
+    const result = await getMakeupTickets(startDate, endDate, statusFilter === 'all' ? 'all' : statusFilter);
 
-    // 상태 필터 쿼리 구성
-    let query = supabase
-      .from('makeup_tickets')
-      .select('*')
-      .gte('absence_date', startDate)
-      .lte('absence_date', endDate)
-      .order('absence_date', { ascending: false });
-
-    if (statusFilter !== 'all') {
-      query = query.eq('status', statusFilter);
-    }
-
-    const { data: ticketData, error } = await query;
-
-    if (error) {
-      toast.error('보강 목록 로드 실패');
-      setIsLoading(false);
-      return;
-    }
-
-    if (!ticketData || ticketData.length === 0) {
+    if (result.success) {
+      setTickets(result.data || []);
+    } else {
+      toast.error(result.error || '보강 목록 로드 실패');
       setTickets([]);
-      setIsLoading(false);
-      return;
     }
-
-    // 학생, 반 정보 조회
-    const studentIds = [...new Set(ticketData.map((t) => t.student_id))];
-    const classIds = [...new Set(ticketData.map((t) => t.class_id))];
-
-    const [studentsRes, classesRes] = await Promise.all([
-      supabase.from('students').select('id, name').in('id', studentIds),
-      supabase.from('classes').select('id, name').in('id', classIds),
-    ]);
-
-    const studentMap = new Map(studentsRes.data?.map((s) => [s.id, s.name]) || []);
-    const classMap = new Map(classesRes.data?.map((c) => [c.id, c.name]) || []);
-
-    setTickets(
-      ticketData.map((t) => ({
-        id: t.id,
-        studentId: t.student_id,
-        studentName: studentMap.get(t.student_id) || '알 수 없음',
-        classId: t.class_id,
-        className: classMap.get(t.class_id) || '알 수 없음',
-        absenceDate: t.absence_date,
-        absenceReason: t.absence_reason,
-        status: t.status as 'pending' | 'completed' | 'cancelled',
-        completionNote: t.completion_note,
-      }))
-    );
 
     setIsLoading(false);
-  }, [supabase, getDateRange, statusFilter]);
+  }, [getDateRange, statusFilter]);
 
   // 필터 변경 시 로드
   useEffect(() => {
