@@ -574,8 +574,51 @@ export async function updateOptionOrder(
 
 /**
  * 템플릿 적용 (기존 아카이브 + 새 Set/Options 생성)
+ * 트랜잭션으로 처리하여 데이터 무결성 보장
  */
 export async function applyTemplate(
+  configId: string,
+  templateData: TemplateSetData[]
+): Promise<ActionResult<OptionSetWithOptions>> {
+  try {
+    const sb = await supabaseServer();
+    const { tenantId } = await getTenantIdOrThrow(sb);
+
+    // RPC 호출 (트랜잭션 처리)
+    const { data, error } = await sb.rpc('apply_feed_template', {
+      p_config_id: configId,
+      p_tenant_id: tenantId,
+      p_template_data: templateData,
+    });
+
+    if (error) {
+      console.error('applyTemplate RPC error:', error);
+      throw error;
+    }
+
+    if (!data?.success) {
+      return { ok: false, message: '템플릿 적용에 실패했습니다' };
+    }
+
+    // RPC 결과 파싱
+    const sets: OptionSet[] = data.sets || [];
+    const options: Record<string, Option[]> = data.options || {};
+
+    return {
+      ok: true,
+      data: { sets, options },
+    };
+  } catch (error) {
+    console.error('applyTemplate error:', error);
+    return { ok: false, message: '템플릿 적용에 실패했습니다' };
+  }
+}
+
+/**
+ * 템플릿 적용 (Fallback - RPC가 없을 경우)
+ * 기존 로직 유지, 트랜잭션 미지원
+ */
+export async function applyTemplateFallback(
   configId: string,
   templateData: TemplateSetData[]
 ): Promise<ActionResult<OptionSetWithOptions>> {
@@ -644,7 +687,7 @@ export async function applyTemplate(
       data: { sets: newSets, options: newOptions },
     };
   } catch (error) {
-    console.error('applyTemplate error:', error);
+    console.error('applyTemplateFallback error:', error);
     return { ok: false, message: '템플릿 적용에 실패했습니다' };
   }
 }

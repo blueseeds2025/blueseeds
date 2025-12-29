@@ -583,10 +583,18 @@ export const useFeedSettingsStore = create<FeedSettingsState>((set, get) => ({
   },
 
   applyTemplate: async (templateKey) => {
-    const { activeConfig, archiveAllCurrentSets } = get();
+    let { activeConfig } = get();
+    const { archiveAllCurrentSets, loadData } = get();
+    
+    // activeConfig가 없으면 먼저 로드
     if (!activeConfig) {
-      toast.error('설정을 찾을 수 없습니다');
-      return;
+      await loadData();
+      activeConfig = get().activeConfig;
+      
+      if (!activeConfig) {
+        toast.error('설정을 찾을 수 없습니다');
+        return;
+      }
     }
 
     if (templateKey === 'custom') {

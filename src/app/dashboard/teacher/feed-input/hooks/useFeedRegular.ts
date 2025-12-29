@@ -18,7 +18,7 @@ import {
   getSavedFeeds,
   getPreviousProgressBatch,
   saveFeed,
-  saveAllFeeds,
+  saveAllFeedsBulk,
 } from '../actions/feed.actions';
 import { generateIdempotencyKey, TOAST_MESSAGES } from '../constants';
 
@@ -378,10 +378,10 @@ export function useFeedRegular({
         };
       });
       
-      const result = await saveAllFeeds(payloads);
+      const result = await saveAllFeedsBulk(payloads);
       
-      const successCount = result.results.filter(r => r.success).length;
-      const failCount = result.results.filter(r => !r.success).length;
+      const successCount = result.totalSaved;
+      const failCount = result.totalFailed;
       
       if (failCount === 0) {
         toast.success(TOAST_MESSAGES.SAVE_ALL_SUCCESS(successCount));

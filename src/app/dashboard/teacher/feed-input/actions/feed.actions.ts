@@ -15,6 +15,11 @@ export {
   saveAllFeeds,
 } from './feed-save.actions';
 
+// 저장 (최적화 버전)
+export {
+  saveAllFeedsBulk,
+} from './feed-save-bulk.actions';
+
 // 보강
 export {
   getPendingMakeupTickets,
