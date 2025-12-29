@@ -1,16 +1,14 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Calendar, AlertCircle, Lock } from 'lucide-react';
-import { toast } from 'sonner';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Database } from '@/lib/database.types';
 import { PREMIUM_COLORS } from '@/lib/premium.styles';
 
-// 결석 사유 목록
+// ============================================================================
+// Constants
+// ============================================================================
+
 const ABSENCE_REASONS = [
   { key: '병결', label: '병결', description: '질병으로 인한 결석' },
   { key: '학교행사', label: '학교행사', description: '학교 일정으로 인한 결석' },
@@ -19,115 +17,42 @@ const ABSENCE_REASONS = [
   { key: '기타', label: '기타', description: '기타 사유' },
 ];
 
+// ============================================================================
+// Types
+// ============================================================================
+
 interface MakeupSettingsSectionProps {
-  supabase: SupabaseClient<Database>;
-  getTenantId: () => Promise<string | null>;
-  /** 기능 활성화 여부 (tenant_features에서) */
-  hasMakeupSystem?: boolean;
-  /** 업그레이드 안내 콜백 */
+  makeupDefaults: Record<string, boolean>;
+  isLoading: boolean;
+  isSaving: boolean;
+  hasMakeupSystem: boolean;
+  onToggle: (reasonKey: string, checked: boolean) => void;
   onUpgradeClick?: () => void;
 }
 
+// ============================================================================
+// Component
+// ============================================================================
+
 export default function MakeupSettingsSection({
-  supabase,
-  getTenantId,
-  hasMakeupSystem = false,
+  makeupDefaults,
+  isLoading,
+  isSaving,
+  hasMakeupSystem,
+  onToggle,
   onUpgradeClick,
 }: MakeupSettingsSectionProps) {
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  
-  // 보강 기본 설정 (사유별 보강 필요 여부)
-  const [makeupDefaults, setMakeupDefaults] = useState<Record<string, boolean>>({
-    '병결': true,
-    '학교행사': true,
-    '가사': false,
-    '무단': false,
-    '기타': true,
-  });
-
-  // 설정 불러오기
-  const loadSettings = useCallback(async () => {
-    try {
-      const tenantId = await getTenantId();
-      if (!tenantId) return;
-
-      const { data: tenant } = await supabase
-        .from('tenants')
-        .select('settings')
-        .eq('id', tenantId)
-        .single();
-
-      if (tenant?.settings) {
-        const settings = tenant.settings as Record<string, any>;
-        if (settings.makeup_defaults) {
-          setMakeupDefaults(settings.makeup_defaults);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load makeup settings:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [supabase, getTenantId]);
-
-  useEffect(() => {
-    loadSettings();
-  }, [loadSettings]);
-
-  // 설정 저장
-  const saveSettings = async (newDefaults: Record<string, boolean>) => {
-    if (!hasMakeupSystem) return;
-    
-    setIsSaving(true);
-    try {
-      const tenantId = await getTenantId();
-      if (!tenantId) return;
-
-      // 기존 settings 가져오기
-      const { data: tenant } = await supabase
-        .from('tenants')
-        .select('settings')
-        .eq('id', tenantId)
-        .single();
-
-      const currentSettings = (tenant?.settings as Record<string, any>) || {};
-
-      // makeup_defaults 업데이트
-      const { error } = await supabase
-        .from('tenants')
-        .update({
-          settings: {
-            ...currentSettings,
-            makeup_defaults: newDefaults,
-          },
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', tenantId);
-
-      if (error) throw error;
-      
-      toast.success('보강 설정이 저장되었습니다');
-    } catch (error) {
-      console.error('Failed to save makeup settings:', error);
-      toast.error('설정 저장에 실패했습니다');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  // 체크박스 변경 핸들러
-  const handleToggle = (reasonKey: string, checked: boolean) => {
-    const newDefaults = {
-      ...makeupDefaults,
-      [reasonKey]: checked,
-    };
-    setMakeupDefaults(newDefaults);
-    saveSettings(newDefaults);
-  };
-
-  // 기능 잠금 상태
   const isLocked = !hasMakeupSystem;
+
+  if (isLoading) {
+    return (
+      <Card className="border border-[#E8E5E0] shadow-sm">
+        <CardContent className="py-4">
+          <div className="text-gray-500 text-sm">설정 불러오는 중...</div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="border border-[#E8E5E0] shadow-sm relative overflow-hidden">
@@ -198,13 +123,13 @@ export default function MakeupSettingsSection({
               className="flex items-center justify-between p-3 bg-[#F7F6F3] rounded-lg hover:bg-[#F3F2EF] transition-colors"
             >
               <div className="flex items-center gap-3">
-               <Checkbox
-  id={`makeup-${reason.key}`}
-  checked={makeupDefaults[reason.key] ?? false}
-  onCheckedChange={(checked) => handleToggle(reason.key, checked as boolean)}
-  disabled={isLocked || isSaving}
-  className="data-[state=checked]:bg-[#7C3AED] data-[state=checked]:border-[#7C3AED]"
-/>
+                <Checkbox
+                  id={`makeup-${reason.key}`}
+                  checked={makeupDefaults[reason.key] ?? false}
+                  onCheckedChange={(checked) => onToggle(reason.key, checked as boolean)}
+                  disabled={isLocked || isSaving}
+                  className="data-[state=checked]:bg-[#7C3AED] data-[state=checked]:border-[#7C3AED]"
+                />
                 <label
                   htmlFor={`makeup-${reason.key}`}
                   className="cursor-pointer"

@@ -275,6 +275,8 @@ async function saveRegularFeedsBulk(
   
   // 4. Bulk UPDATE (개별 업데이트 - Supabase는 bulk update 지원 안 함)
   // 하지만 병렬 처리로 속도 개선
+  const successfulUpdateIds: string[] = [];  // 성공한 업데이트 ID 추적
+  
   if (toUpdate.length > 0) {
     const updatePromises = toUpdate.map(async ({ id, data }) => {
       const { error } = await supabase
@@ -298,18 +300,18 @@ async function saveRegularFeedsBulk(
         results.push({ studentId, success: false, error: '업데이트 실패' });
       } else {
         results.push({ studentId, success: true, feedId: id });
+        successfulUpdateIds.push(id);  // 성공한 것만 추가
       }
     });
   }
   
   // 5. feed_values 처리
-  // 5-1. 기존 feed_values 삭제 (업데이트된 피드들)
-  const feedIdsToDeleteValues = toUpdate.map(u => u.id);
-  if (feedIdsToDeleteValues.length > 0) {
+  // 5-1. 기존 feed_values 삭제 (성공한 업데이트만!)
+  if (successfulUpdateIds.length > 0) {
     await supabase
       .from('feed_values')
       .delete()
-      .in('feed_id', feedIdsToDeleteValues);
+      .in('feed_id', successfulUpdateIds);
   }
   
   // 5-2. 새 feed_values 삽입
@@ -469,6 +471,8 @@ async function saveMakeupFeedsBulk(
   }
   
   // 4. Bulk UPDATE
+  const successfulUpdateIds: string[] = [];  // 성공한 업데이트 ID 추적
+  
   if (toUpdate.length > 0) {
     const updatePromises = toUpdate.map(async ({ id, data }) => {
       const { error } = await supabase
@@ -499,17 +503,17 @@ async function saveMakeupFeedsBulk(
           success: true, 
           feedId 
         });
+        successfulUpdateIds.push(feedId);  // 성공한 것만 추가
       }
     }
   }
   
-  // 5. feed_values 처리 (정규와 동일)
-  const feedIdsToDeleteValues = toUpdate.map(u => u.id);
-  if (feedIdsToDeleteValues.length > 0) {
+  // 5. feed_values 처리 (성공한 업데이트만!)
+  if (successfulUpdateIds.length > 0) {
     await supabase
       .from('feed_values')
       .delete()
-      .in('feed_id', feedIdsToDeleteValues);
+      .in('feed_id', successfulUpdateIds);
   }
   
   const allFeedValues: {

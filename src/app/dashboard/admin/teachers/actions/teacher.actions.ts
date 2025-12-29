@@ -61,11 +61,16 @@ async function getTenantIdOrThrow(sb: Awaited<ReturnType<typeof supabaseServer>>
 /** 교사 목록 조회 */
 export async function listTeachers(): Promise<Teacher[]> {
   const sb = await supabaseServer();
-  const { tenantId } = await getTenantIdOrThrow(sb);
+  const { tenantId, role } = await getTenantIdOrThrow(sb);
+
+  // owner만 접근 가능
+  if (role !== 'owner') {
+    throw new Error('권한이 없습니다');
+  }
 
   const { data, error } = await sb
     .from('profiles')
-    .select('*')
+    .select('id, tenant_id, name, display_name, color, role, created_at, updated_at')
     .eq('tenant_id', tenantId)
     .eq('role', 'teacher')
     .is('deleted_at', null)
@@ -82,12 +87,17 @@ export async function listTeachers(): Promise<Teacher[]> {
 /** 교사 상세 정보 조회 (담당 반 + 피드 권한) */
 export async function getTeacherDetails(teacherId: string): Promise<TeacherWithDetails | null> {
   const sb = await supabaseServer();
-  const { tenantId } = await getTenantIdOrThrow(sb);
+  const { tenantId, role } = await getTenantIdOrThrow(sb);
 
-  // 1. 교사 기본 정보
+  // owner만 접근 가능
+  if (role !== 'owner') {
+    return null;
+  }
+
+  // 1. 교사 기본 정보 (필요한 컬럼만)
   const { data: teacher, error: teacherErr } = await sb
     .from('profiles')
-    .select('*')
+    .select('id, tenant_id, name, display_name, color, role, created_at, updated_at')
     .eq('id', teacherId)
     .eq('tenant_id', tenantId)
     .eq('role', 'teacher')
@@ -224,14 +234,7 @@ export async function saveFeedPermissions(
       return { ok: false, message: '권한이 없습니다' };
     }
 
-    // 기존 권한 삭제 (soft delete)
-    await sb
-      .from('teacher_feed_permissions')
-      .update({ deleted_at: new Date().toISOString() })
-      .eq('teacher_id', teacherId)
-      .eq('tenant_id', tenantId);
-
-    // 새 권한 추가
+    // 새 권한 먼저 추가 (실패 시 기존 데이터 유지)
     if (permissions.length > 0) {
       const rows = permissions.map((p) => ({
         tenant_id: tenantId,
@@ -250,6 +253,26 @@ export async function saveFeedPermissions(
       }
     }
 
+    // insert 성공 후 기존 권한 삭제 (soft delete)
+    // 방금 추가한 것들 제외하고 삭제
+    const newOptionSetIds = permissions.map(p => p.option_set_id);
+    
+    let deleteQuery = sb
+      .from('teacher_feed_permissions')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('teacher_id', teacherId)
+      .eq('tenant_id', tenantId)
+      .is('deleted_at', null);
+    
+    // 새로 추가한 option_set_id는 삭제에서 제외
+    if (newOptionSetIds.length > 0) {
+      // 최근 1초 내에 생성된 것은 삭제하지 않음 (방금 추가한 것)
+      const oneSecondAgo = new Date(Date.now() - 1000).toISOString();
+      deleteQuery = deleteQuery.lt('created_at', oneSecondAgo);
+    }
+
+    await deleteQuery;
+
     revalidatePath('/dashboard/admin/teachers');
     return { ok: true };
   } catch (e: any) {
@@ -265,7 +288,12 @@ export async function saveFeedPermissions(
 /** 배정 가능한 반 목록 */
 export async function getAvailableClasses(): Promise<ClassInfo[]> {
   const sb = await supabaseServer();
-  const { tenantId } = await getTenantIdOrThrow(sb);
+  const { tenantId, role } = await getTenantIdOrThrow(sb);
+
+  // owner만 접근 가능
+  if (role !== 'owner') {
+    throw new Error('권한이 없습니다');
+  }
 
   const { data, error } = await sb
     .from('classes')
@@ -296,20 +324,44 @@ export async function assignClass(
       return { ok: false, message: '권한이 없습니다' };
     }
 
-    // 이미 배정되어 있는지 확인
+    // 이미 배정되어 있는지 확인 (비활성 포함, tenant_id 추가)
     const { data: existing } = await sb
       .from('class_teachers')
-      .select('id')
+      .select('id, is_active')
+      .eq('tenant_id', tenantId)
       .eq('class_id', classId)
       .eq('teacher_id', teacherId)
-      .eq('is_active', true)
       .is('deleted_at', null)
       .maybeSingle();
 
-    if (existing) {
+    // 활성 상태로 이미 있으면 에러
+    if (existing?.is_active) {
       return { ok: false, message: '이미 배정된 반입니다' };
     }
 
+    // 비활성 상태로 있으면 재활성화
+    if (existing && !existing.is_active) {
+      const { error: updateError } = await sb
+        .from('class_teachers')
+        .update({
+          is_active: true,
+          role,
+          assigned_at: new Date().toISOString(),
+          unassigned_at: null,
+        })
+        .eq('id', existing.id)
+        .eq('tenant_id', tenantId);
+
+      if (updateError) {
+        console.error('[assignClass] reactivate error:', updateError);
+        return { ok: false, message: updateError.message };
+      }
+
+      revalidatePath('/dashboard/admin/teachers');
+      return { ok: true };
+    }
+
+    // 새로 생성
     const { error } = await sb
       .from('class_teachers')
       .insert({
@@ -374,7 +426,12 @@ export async function unassignClass(teacherId: string, classId: string): Promise
 /** 전체 피드 항목 목록 */
 export async function listFeedOptionSets(): Promise<FeedOptionSet[]> {
   const sb = await supabaseServer();
-  const { tenantId } = await getTenantIdOrThrow(sb);
+  const { tenantId, role } = await getTenantIdOrThrow(sb);
+
+  // owner만 접근 가능
+  if (role !== 'owner') {
+    throw new Error('권한이 없습니다');
+  }
 
   const { data, error } = await sb
     .from('feed_option_sets')

@@ -228,11 +228,13 @@ export async function searchMakeupStudents(
       return { success: false, error: '프로필을 찾을 수 없습니다' };
     }
     
-    // 현재 반에 이미 있는 학생 ID
+    // 현재 반에 이미 있는 학생 ID (tenant_id 필터 추가)
     const { data: currentMembers } = await supabase
       .from('class_members')
       .select('student_id')
+      .eq('tenant_id', profile.tenant_id)
       .eq('class_id', classId)
+      .eq('is_active', true)
       .is('deleted_at', null);
     
     const currentIds = currentMembers?.map(m => m.student_id) || [];
@@ -246,8 +248,10 @@ export async function searchMakeupStudents(
       .is('deleted_at', null)
       .limit(10);
     
+    // UUID 필터 수정: 따옴표 추가
     if (currentIds.length > 0) {
-      searchQuery = searchQuery.not('id', 'in', `(${currentIds.join(',')})`);
+      const inList = currentIds.map(id => `"${id}"`).join(',');
+      searchQuery = searchQuery.not('id', 'in', `(${inList})`);
     }
     
     const { data, error } = await searchQuery;

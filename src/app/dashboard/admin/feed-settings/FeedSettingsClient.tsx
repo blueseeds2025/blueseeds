@@ -45,6 +45,14 @@ import { usePresetUI } from './hooks/usePresetUI';
 import { usePresetList } from './hooks/usePresetList';
 import { useConfirmDialog } from './hooks/useConfirmDialog';
 
+// Server Actions
+import {
+  getTenantSettings,
+  updateBasicSettings,
+  updateMakeupSettings,
+  type BasicSettings,
+} from './actions/feed-settings.actions';
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -170,6 +178,22 @@ export default function FeedSettingsClient() {
   // ========== Feature Flags ==========
   const [hasMakeupSystem, setHasMakeupSystem] = useState(false);
 
+  // ========== Tenant Settings ==========
+  const [basicSettings, setBasicSettings] = useState<BasicSettings>({
+    progress_enabled: false,
+    materials_enabled: false,
+    exam_score_enabled: false,
+  });
+  const [makeupDefaults, setMakeupDefaults] = useState<Record<string, boolean>>({
+    '병결': true,
+    '학교행사': true,
+    '가사': false,
+    '무단': false,
+    '기타': true,
+  });
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+
   // ========== Tenant ID ==========
   const [cachedTenantId, setCachedTenantId] = useState<string | null>(null);
 
@@ -247,6 +271,55 @@ export default function FeedSettingsClient() {
     
     loadFeatures();
   }, [supabase, getTenantId]);
+
+  // Tenant Settings 로드
+  useEffect(() => {
+    const loadSettings = async () => {
+      setSettingsLoading(true);
+      const result = await getTenantSettings();
+      if (result.ok && result.data) {
+        setBasicSettings(result.data.basic);
+        setMakeupDefaults(result.data.makeup.makeup_defaults);
+      }
+      setSettingsLoading(false);
+    };
+    
+    loadSettings();
+  }, []);
+
+  // Basic Settings 업데이트 핸들러
+  const handleUpdateBasicSetting = useCallback(async (key: keyof BasicSettings, value: boolean) => {
+    const newSettings = { ...basicSettings, [key]: value };
+    setBasicSettings(newSettings); // Optimistic update
+    setSettingsSaving(true);
+    
+    const result = await updateBasicSettings(newSettings);
+    if (result.ok) {
+      toast.success('설정이 저장되었습니다', { duration: 2000 });
+    } else {
+      setBasicSettings(basicSettings); // Rollback
+      toast.error('설정 저장에 실패했습니다');
+    }
+    setSettingsSaving(false);
+  }, [basicSettings]);
+
+  // Makeup Settings 업데이트 핸들러
+  const handleUpdateMakeupDefault = useCallback(async (reasonKey: string, checked: boolean) => {
+    if (!hasMakeupSystem) return;
+    
+    const newDefaults = { ...makeupDefaults, [reasonKey]: checked };
+    setMakeupDefaults(newDefaults); // Optimistic update
+    setSettingsSaving(true);
+    
+    const result = await updateMakeupSettings(newDefaults);
+    if (result.ok) {
+      toast.success('보강 설정이 저장되었습니다', { duration: 2000 });
+    } else {
+      setMakeupDefaults(makeupDefaults); // Rollback
+      toast.error('설정 저장에 실패했습니다');
+    }
+    setSettingsSaving(false);
+  }, [makeupDefaults, hasMakeupSystem]);
 
   // ========== Handlers ==========
   const handleUpdateSetName = useCallback(async (setId: string) => {
@@ -522,13 +595,20 @@ export default function FeedSettingsClient() {
       </Card>
 
       {/* 기본 항목 설정 */}
-      <BasicSettingsSection supabase={supabase} getTenantId={getTenantId} />
+      <BasicSettingsSection
+        settings={basicSettings}
+        isLoading={settingsLoading}
+        isSaving={settingsSaving}
+        onUpdateSetting={handleUpdateBasicSetting}
+      />
 
       {/* 결석/보강 설정 */}
       <MakeupSettingsSection
-        supabase={supabase}
-        getTenantId={getTenantId}
+        makeupDefaults={makeupDefaults}
+        isLoading={settingsLoading}
+        isSaving={settingsSaving}
         hasMakeupSystem={hasMakeupSystem}
+        onToggle={handleUpdateMakeupDefault}
         onUpgradeClick={() => {
           toast.info('프리미엄 요금제로 업그레이드하시면 결석/보강 관리 기능을 사용하실 수 있습니다.');
         }}

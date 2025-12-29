@@ -353,7 +353,32 @@ export async function applyFeedPreset(presetId: string): Promise<ActionResult> {
 
     const sets = (presetSets ?? []) as any[];
 
-    // 4. 세트/옵션 생성
+    if (sets.length === 0) {
+      return { ok: true }; // 빈 프리셋
+    }
+
+    // 4. 모든 프리셋 옵션 한번에 로드 (N+1 해결)
+    const presetSetIds = sets.map((s: any) => s.id);
+    const { data: allPresetOptions, error: allOptErr } = await sb
+      .from('feed_preset_options')
+      .select('*')
+      .in('preset_set_id', presetSetIds)
+      .order('display_order');
+
+    if (allOptErr) {
+      return { ok: false, message: allOptErr.message };
+    }
+
+    // preset_set_id별로 그룹핑
+    const optionsByPresetSetId: Record<string, any[]> = {};
+    for (const opt of allPresetOptions ?? []) {
+      if (!optionsByPresetSetId[opt.preset_set_id]) {
+        optionsByPresetSetId[opt.preset_set_id] = [];
+      }
+      optionsByPresetSetId[opt.preset_set_id].push(opt);
+    }
+
+    // 5. 세트/옵션 생성
     for (let i = 0; i < sets.length; i++) {
       const s = sets[i];
       let createdSet: any = null;
@@ -398,22 +423,13 @@ export async function applyFeedPreset(presetId: string): Promise<ActionResult> {
         return { ok: false, message: '세트 생성 실패: 이름 중복' };
       }
 
-      // 옵션 로드 및 생성
-      const { data: presetOptions, error: presetOptErr } = await sb
-        .from('feed_preset_options')
-        .select('*')
-        .eq('preset_set_id', s.id)
-        .order('display_order');
-
-      if (presetOptErr) {
-        return { ok: false, message: presetOptErr.message };
-      }
-
-      const opts = (presetOptions ?? []) as any[];
+      // 메모리에서 옵션 가져오기 (DB 조회 없음)
+      const opts = optionsByPresetSetId[s.id] ?? [];
 
       if (opts.length > 0) {
         const inserts = opts.map((o: any, idx: number) => ({
           set_id: createdSet.id,
+          tenant_id: tenantId,
           label: clip(o.label, 50),
           score: o.score ?? null,
           display_order: o.display_order ?? idx,

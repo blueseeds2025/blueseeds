@@ -1,93 +1,36 @@
 'use client';
 
-import { useState, useEffect } from 'react';
 import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BookOpen, Package, FileText } from 'lucide-react';
-import { toast } from 'sonner';
 
-interface TenantSettings {
+// ============================================================================
+// Types
+// ============================================================================
+
+export interface BasicSettings {
   progress_enabled: boolean;
   materials_enabled: boolean;
   exam_score_enabled: boolean;
 }
 
 interface BasicSettingsSectionProps {
-  supabase: any;
-  getTenantId: () => Promise<string | null>;
+  settings: BasicSettings;
+  isLoading: boolean;
+  isSaving: boolean;
+  onUpdateSetting: (key: keyof BasicSettings, value: boolean) => void;
 }
 
+// ============================================================================
+// Component
+// ============================================================================
+
 export default function BasicSettingsSection({ 
-  supabase, 
-  getTenantId 
+  settings,
+  isLoading,
+  isSaving,
+  onUpdateSetting,
 }: BasicSettingsSectionProps) {
-  const [settings, setSettings] = useState<TenantSettings>({
-    progress_enabled: false,
-    materials_enabled: false,
-    exam_score_enabled: false,
-  });
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-
-  // 설정 로드
-  useEffect(() => {
-    async function loadSettings() {
-      try {
-        const tenantId = await getTenantId();
-        if (!tenantId) return;
-
-        const { data: tenant } = await supabase
-          .from('tenants')
-          .select('settings')
-          .eq('id', tenantId)
-          .single();
-
-        if (tenant?.settings) {
-          setSettings({
-            progress_enabled: tenant.settings.progress_enabled ?? false,
-            materials_enabled: tenant.settings.materials_enabled ?? false,
-            exam_score_enabled: tenant.settings.exam_score_enabled ?? false,
-          });
-        }
-      } catch (error) {
-        console.error('설정 로드 실패:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-
-    loadSettings();
-  }, [supabase, getTenantId]);
-
-  // 설정 저장
-  const updateSetting = async (key: keyof TenantSettings, value: boolean) => {
-    setIsSaving(true);
-    
-    const newSettings = { ...settings, [key]: value };
-    setSettings(newSettings);
-
-    try {
-      const tenantId = await getTenantId();
-      if (!tenantId) throw new Error('Tenant ID not found');
-
-      const { error } = await supabase
-        .from('tenants')
-        .update({ settings: newSettings })
-        .eq('id', tenantId);
-
-      if (error) throw error;
-
-      toast.success('설정이 저장되었습니다', { duration: 2000 });
-    } catch (error) {
-      console.error('설정 저장 실패:', error);
-      toast.error('설정 저장에 실패했습니다');
-      // 롤백
-      setSettings(settings);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
   if (isLoading) {
     return (
       <Card className="mb-6 border-[#E8E5E0]">
@@ -120,7 +63,7 @@ export default function BasicSettingsSection({
           </div>
           <Switch
             checked={settings.progress_enabled}
-            onCheckedChange={(v) => updateSetting('progress_enabled', v)}
+            onCheckedChange={(v) => onUpdateSetting('progress_enabled', v)}
             disabled={isSaving}
             className="data-[state=checked]:bg-[#6366F1]"
           />
@@ -137,7 +80,7 @@ export default function BasicSettingsSection({
           </div>
           <Switch
             checked={settings.materials_enabled}
-            onCheckedChange={(v) => updateSetting('materials_enabled', v)}
+            onCheckedChange={(v) => onUpdateSetting('materials_enabled', v)}
             disabled={isSaving}
             className="data-[state=checked]:bg-[#059669]"
           />
@@ -154,7 +97,7 @@ export default function BasicSettingsSection({
           </div>
           <Switch
             checked={settings.exam_score_enabled}
-            onCheckedChange={(v) => updateSetting('exam_score_enabled', v)}
+            onCheckedChange={(v) => onUpdateSetting('exam_score_enabled', v)}
             disabled={isSaving}
             className="data-[state=checked]:bg-[#EA580C]"
           />

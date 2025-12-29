@@ -47,7 +47,9 @@ export async function getTeacherClasses(): Promise<{
       const { data: assignments } = await supabase
         .from('class_teachers')
         .select('class_id')
+        .eq('tenant_id', profile.tenant_id)
         .eq('teacher_id', user.id)
+        .eq('is_active', true)
         .is('deleted_at', null);
       
       const classIds = assignments?.map(a => a.class_id) || [];
@@ -82,6 +84,22 @@ export async function getClassStudents(classId: string): Promise<{
   try {
     const supabase = await createClient();
     
+    // 인증 체크
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { success: false, error: '로그인이 필요합니다' };
+    }
+    
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('tenant_id')
+      .eq('id', user.id)
+      .single();
+    
+    if (!profile) {
+      return { success: false, error: '프로필을 찾을 수 없습니다' };
+    }
+    
     const { data, error } = await supabase
       .from('class_members')
       .select(`
@@ -92,7 +110,9 @@ export async function getClassStudents(classId: string): Promise<{
           display_code
         )
       `)
+      .eq('tenant_id', profile.tenant_id)
       .eq('class_id', classId)
+      .eq('is_active', true)
       .is('deleted_at', null);
     
     if (error) throw error;
@@ -233,6 +253,22 @@ export async function getSavedFeeds(
   try {
     const supabase = await createClient();
     
+    // 인증 체크
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { success: false, error: '로그인이 필요합니다' };
+    }
+    
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('tenant_id')
+      .eq('id', user.id)
+      .single();
+    
+    if (!profile) {
+      return { success: false, error: '프로필을 찾을 수 없습니다' };
+    }
+    
     const { data: feeds, error: feedsError } = await supabase
       .from('student_feeds')
       .select(`
@@ -246,6 +282,7 @@ export async function getSavedFeeds(
         progress_text,
         memo_values
       `)
+      .eq('tenant_id', profile.tenant_id)
       .eq('class_id', classId)
       .eq('feed_date', feedDate);
     
@@ -376,9 +413,22 @@ export async function getPreviousProgress(
   try {
     const supabase = await createClient();
     
+    // 인증 체크
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+    
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('tenant_id')
+      .eq('id', user.id)
+      .single();
+    
+    if (!profile) return null;
+    
     const { data } = await supabase
       .from('student_feeds')
       .select('progress_text')
+      .eq('tenant_id', profile.tenant_id)
       .eq('student_id', studentId)
       .lt('feed_date', currentDate)
       .not('progress_text', 'is', null)
@@ -405,9 +455,22 @@ export async function getPreviousProgressBatch(
     
     const supabase = await createClient();
     
+    // 인증 체크
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return {};
+    
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('tenant_id')
+      .eq('id', user.id)
+      .single();
+    
+    if (!profile) return {};
+    
     const { data, error } = await supabase
       .from('student_feeds')
       .select('student_id, progress_text, feed_date')
+      .eq('tenant_id', profile.tenant_id)
       .in('student_id', studentIds)
       .lt('feed_date', currentDate)
       .not('progress_text', 'is', null)

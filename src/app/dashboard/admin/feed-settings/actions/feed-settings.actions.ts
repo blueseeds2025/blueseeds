@@ -311,7 +311,7 @@ export async function duplicateOptionSet(
         tenant_id: tenantId,
         name: newName,
         set_key: `${sourceSet.set_key}_copy_${timestamp}`,
-        category: newName,
+        category: sourceSet.default_report_category ?? 'study',  // default_report_category 사용
         is_scored: sourceSet.is_scored,
         score_step: sourceSet.score_step,
         is_active: true,
@@ -337,6 +337,7 @@ export async function duplicateOptionSet(
     if (sourceOptions && sourceOptions.length > 0) {
       const inserts = sourceOptions.map((o: any, idx: number) => ({
         set_id: newSet.id,
+        tenant_id: tenantId,
         label: o.label,
         score: o.score,
         display_order: idx,
@@ -380,7 +381,7 @@ export async function createOptionSet(
         tenant_id: tenantId,
         name: params.name,
         set_key: params.setKey,
-        category: params.name,
+        category: params.category,  // 버그 수정: params.name → params.category
         is_scored: params.isScored,
         score_step: params.scoreStep,
         is_active: true,
@@ -462,10 +463,11 @@ export async function createOption(
 ): Promise<ActionResult<Option>> {
   try {
     const sb = await supabaseServer();
-    await getTenantIdOrThrow(sb); // 권한 검증
+    const { tenantId } = await getTenantIdOrThrow(sb);
 
     const insertData: Record<string, unknown> = {
       set_id: params.setId,
+      tenant_id: tenantId,
       label: params.label,
       display_order: params.displayOrder,
       is_active: true,
@@ -551,7 +553,7 @@ export async function updateOptionOrder(
 
   try {
     const sb = await supabaseServer();
-    const tenantId = await getTenantIdOrThrow(sb); // 권한 검증
+    const { tenantId } = await getTenantIdOrThrow(sb); // 버그 수정: destructuring 추가
 
     // RPC로 Bulk Update (1번의 DB 호출)
     const { data, error } = await sb.rpc('bulk_update_option_order', {
@@ -666,30 +668,31 @@ export async function applyTemplateFallback(
 
       if (setError || !newSet) throw setError;
 
-      const createdOptions: Option[] = [];
+      // Options Bulk Insert (N+1 해결)
+      if (setData.options.length > 0) {
+        const optionInserts = setData.options.map((opt, i) => ({
+          set_id: newSet.id,
+          tenant_id: tenantId,
+          label: opt.label,
+          score: opt.score,
+          display_order: i,
+          is_active: true,
+          report_category: setData.report_category ?? 'study',
+        }));
 
-      for (let i = 0; i < setData.options.length; i++) {
-        const { data: newOpt, error: optError } = await sb
+        const { data: createdOpts, error: optError } = await sb
           .from('feed_options')
-          .insert({
-            set_id: newSet.id,
-            label: setData.options[i].label,
-            score: setData.options[i].score,
-            display_order: i,
-            is_active: true,
-            report_category: setData.report_category ?? 'study',
-          })
-          .select('*')
-          .single();
+          .insert(optionInserts)
+          .select('*');
 
         if (optError) throw optError;
-        if (newOpt) {
-          createdOptions.push(newOpt as Option);
-        }
+
+        newOptions[newSet.id] = (createdOpts as Option[]) ?? [];
+      } else {
+        newOptions[newSet.id] = [];
       }
 
       newSets.push(newSet as OptionSet);
-      newOptions[newSet.id] = createdOptions;
     }
 
     return {
@@ -699,5 +702,147 @@ export async function applyTemplateFallback(
   } catch (error) {
     console.error('applyTemplateFallback error:', error);
     return { ok: false, message: '템플릿 적용에 실패했습니다' };
+  }
+}
+
+// ============================================================================
+// Tenant Settings Actions
+// ============================================================================
+
+export interface BasicSettings {
+  progress_enabled: boolean;
+  materials_enabled: boolean;
+  exam_score_enabled: boolean;
+}
+
+export interface MakeupSettings {
+  makeup_defaults: Record<string, boolean>;
+}
+
+export interface TenantSettingsData {
+  basic: BasicSettings;
+  makeup: MakeupSettings;
+}
+
+/**
+ * Tenant 설정 조회
+ */
+export async function getTenantSettings(): Promise<ActionResult<TenantSettingsData>> {
+  try {
+    const supabase = await supabaseServer();
+    const { tenantId } = await getTenantIdOrThrow(supabase);
+
+    const { data: tenant, error } = await supabase
+      .from('tenants')
+      .select('settings')
+      .eq('id', tenantId)
+      .single();
+
+    if (error) throw error;
+
+    const settings = (tenant?.settings as Record<string, any>) || {};
+
+    return {
+      ok: true,
+      data: {
+        basic: {
+          progress_enabled: settings.progress_enabled ?? false,
+          materials_enabled: settings.materials_enabled ?? false,
+          exam_score_enabled: settings.exam_score_enabled ?? false,
+        },
+        makeup: {
+          makeup_defaults: settings.makeup_defaults ?? {
+            '병결': true,
+            '학교행사': true,
+            '가사': false,
+            '무단': false,
+            '기타': true,
+          },
+        },
+      },
+    };
+  } catch (error) {
+    console.error('getTenantSettings error:', error);
+    return { ok: false, message: '설정을 불러오는데 실패했습니다' };
+  }
+}
+
+/**
+ * 기본 설정 업데이트
+ */
+export async function updateBasicSettings(
+  settings: BasicSettings
+): Promise<ActionResult> {
+  try {
+    const supabase = await supabaseServer();
+    const { tenantId } = await getTenantIdOrThrow(supabase);
+
+    // 기존 settings 가져오기
+    const { data: tenant } = await supabase
+      .from('tenants')
+      .select('settings')
+      .eq('id', tenantId)
+      .single();
+
+    const currentSettings = (tenant?.settings as Record<string, any>) || {};
+
+    // 병합하여 업데이트
+    const { error } = await supabase
+      .from('tenants')
+      .update({
+        settings: {
+          ...currentSettings,
+          ...settings,
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', tenantId);
+
+    if (error) throw error;
+
+    return { ok: true };
+  } catch (error) {
+    console.error('updateBasicSettings error:', error);
+    return { ok: false, message: '설정 저장에 실패했습니다' };
+  }
+}
+
+/**
+ * 보강 설정 업데이트
+ */
+export async function updateMakeupSettings(
+  makeupDefaults: Record<string, boolean>
+): Promise<ActionResult> {
+  try {
+    const supabase = await supabaseServer();
+    const { tenantId } = await getTenantIdOrThrow(supabase);
+
+    // 기존 settings 가져오기
+    const { data: tenant } = await supabase
+      .from('tenants')
+      .select('settings')
+      .eq('id', tenantId)
+      .single();
+
+    const currentSettings = (tenant?.settings as Record<string, any>) || {};
+
+    // makeup_defaults 업데이트
+    const { error } = await supabase
+      .from('tenants')
+      .update({
+        settings: {
+          ...currentSettings,
+          makeup_defaults: makeupDefaults,
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', tenantId);
+
+    if (error) throw error;
+
+    return { ok: true };
+  } catch (error) {
+    console.error('updateMakeupSettings error:', error);
+    return { ok: false, message: '설정 저장에 실패했습니다' };
   }
 }
