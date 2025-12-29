@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useTransition } from 'react';
+import { toast } from 'sonner';
 import type { Student, StudentWithDetails, ClassInfo, StudentWithClasses } from '../types';
 import {
   listStudents,
@@ -24,12 +25,14 @@ export function useStudents() {
   const [isLoading, setIsLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // 토스트 표시
+  // 토스트 표시 (sonner 사용)
   const showToast = useCallback((type: 'success' | 'error', text: string) => {
-    setToastMessage({ type, text });
-    setTimeout(() => setToastMessage(null), 3000);
+    if (type === 'success') {
+      toast.success(text);
+    } else {
+      toast.error(text);
+    }
   }, []);
 
   // 학생 목록 로드
@@ -216,7 +219,6 @@ export function useStudents() {
     isLoading,
     isPending,
     error,
-    toastMessage,
     
     // 선택
     selectStudent,

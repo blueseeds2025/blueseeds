@@ -540,26 +540,36 @@ export async function deleteOption(optionId: string): Promise<ActionResult> {
 }
 
 /**
- * Option 순서 일괄 변경
+ * Option 순서 일괄 변경 (Bulk Update)
  */
 export async function updateOptionOrder(
   updates: { id: string; displayOrder: number }[]
 ): Promise<ActionResult> {
+  if (updates.length === 0) {
+    return { ok: true };
+  }
+
   try {
     const sb = await supabaseServer();
-    await getTenantIdOrThrow(sb); // 권한 검증
+    const tenantId = await getTenantIdOrThrow(sb); // 권한 검증
 
-    // 병렬 처리
-    const results = await Promise.all(
-      updates.map(({ id, displayOrder }) =>
-        sb.from('feed_options')
-          .update({ display_order: displayOrder })
-          .eq('id', id)
-      )
-    );
+    // RPC로 Bulk Update (1번의 DB 호출)
+    const { data, error } = await sb.rpc('bulk_update_option_order', {
+      p_tenant_id: tenantId,
+      p_updates: updates.map(u => ({
+        id: u.id,
+        display_order: u.displayOrder,
+      })),
+    });
 
-    const firstError = results.find(r => r.error)?.error;
-    if (firstError) throw firstError;
+    if (error) {
+      console.error('updateOptionOrder RPC error:', error);
+      throw error;
+    }
+
+    if (!data?.success) {
+      throw new Error(data?.error || '순서 변경 실패');
+    }
 
     return { ok: true };
   } catch (error) {

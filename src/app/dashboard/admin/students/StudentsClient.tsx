@@ -24,7 +24,6 @@ export function StudentsClient() {
     availableClasses,
     isLoading,
     isPending,
-    toastMessage,
     selectStudent,
     createStudent,
     updateStudent,
@@ -234,18 +233,6 @@ export function StudentsClient() {
           onConfirm={() => deleteStudent(selectedStudent.id)}
           onCancel={() => setShowDeleteModal(false)}
         />
-      )}
-
-      {/* 토스트 메시지 */}
-      {toastMessage && (
-        <div 
-          className={`
-            fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-3 rounded-lg shadow-lg z-50
-            ${toastMessage.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}
-          `}
-        >
-          {toastMessage.text}
-        </div>
       )}
 
       {/* 로딩 오버레이 */}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Search, Users, Phone, School, FileText, ChevronRight, Filter, MapPin, User } from 'lucide-react';
+import { Search, Users, Phone, School, ChevronRight, Filter, MapPin, User, X } from 'lucide-react';
 
 interface ClassInfo {
   id: string;
@@ -276,7 +276,7 @@ function StudentRow({
   );
 }
 
-// 학생 상세 컴포넌트
+// 학생 상세 컴포넌트 (원장용과 동일 디자인)
 function StudentDetail({ 
   student, 
   onClose 
@@ -287,125 +287,103 @@ function StudentDetail({
   const parentPhone = student.parent_phone || student.phone;
   
   return (
-    <div className="p-4">
-      {/* 모바일 뒤로가기 */}
-      <button
-        className="sm:hidden mb-4 text-sm text-[#6366F1] flex items-center gap-1"
-        onClick={onClose}
-      >
-        ← 목록으로
-      </button>
+    <div className="bg-white rounded-lg border border-[#E8E5E0] h-full flex flex-col">
+      {/* 헤더 */}
+      <div className="p-4 border-b border-[#E8E5E0]">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <h2 className="font-semibold text-lg text-[#37352F]">{student.name}</h2>
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+              student.is_active 
+                ? 'bg-green-100 text-green-700' 
+                : 'bg-gray-100 text-gray-600'
+            }`}>
+              {student.is_active ? '재원' : '퇴원'}
+            </span>
+          </div>
+          <button
+            className="p-1 rounded hover:bg-gray-100 transition-colors"
+            onClick={onClose}
+          >
+            <X className="w-5 h-5 text-gray-400" />
+          </button>
+        </div>
+      </div>
 
-      {/* 전체 감싸는 카드 */}
-      <div className="border-2 border-[#6366F1] rounded-xl p-4 bg-white">
-        {/* 헤더 */}
-        <div className="mb-4 pb-4 border-b border-gray-200">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-xl font-bold text-[#37352F]">{student.name}</h2>
-            {!student.is_active && (
-              <span className="text-xs px-2 py-1 rounded-full bg-gray-200 text-gray-600">
-                퇴원
+      {/* 컨텐츠 */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+        {/* 기본 정보 */}
+        <section>
+          <h3 className="text-sm font-medium text-[#37352F] mb-3">기본 정보</h3>
+          <div className="space-y-2">
+            {/* 학교/학년 */}
+            <div className="flex items-center gap-3 text-sm">
+              <School className="w-4 h-4 text-gray-400" />
+              <span className="text-gray-600">
+                {student.school || '-'} / {gradeToText(student.grade)}
               </span>
+            </div>
+            {/* 보호자 연락처 */}
+            <div className="flex items-center gap-3 text-sm">
+              <Phone className="w-4 h-4 text-gray-400" />
+              <div>
+                <span className="text-gray-400 text-xs mr-2">보호자</span>
+                {parentPhone ? (
+                  <a href={`tel:${parentPhone}`} className="text-[#6366F1] hover:underline">
+                    {parentPhone}
+                  </a>
+                ) : (
+                  <span className="text-gray-400">-</span>
+                )}
+              </div>
+            </div>
+            {/* 학생 연락처 */}
+            <div className="flex items-center gap-3 text-sm">
+              <User className="w-4 h-4 text-gray-400" />
+              <div>
+                <span className="text-gray-400 text-xs mr-2">학생</span>
+                {student.student_phone ? (
+                  <a href={`tel:${student.student_phone}`} className="text-[#6366F1] hover:underline">
+                    {student.student_phone}
+                  </a>
+                ) : (
+                  <span className="text-gray-400">-</span>
+                )}
+              </div>
+            </div>
+            {/* 주소 */}
+            {student.address && (
+              <div className="flex items-center gap-3 text-sm">
+                <MapPin className="w-4 h-4 text-gray-400" />
+                <span className="text-gray-600">{student.address}</span>
+              </div>
             )}
           </div>
-          <div 
-            className="inline-flex items-center gap-2 text-sm px-3 py-1 rounded-full"
-            style={{ 
-              backgroundColor: student.class_color + '20',
-              color: student.class_color,
-            }}
-          >
-            <div 
-              className="w-2 h-2 rounded-full"
+        </section>
+
+        {/* 학생 특이사항 */}
+        {student.memo && (
+          <section>
+            <h3 className="text-sm font-medium text-[#37352F] mb-2">학생 특이사항</h3>
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-sm text-amber-800 whitespace-pre-wrap">{student.memo}</p>
+            </div>
+          </section>
+        )}
+
+        {/* 수강 반 */}
+        <section>
+          <h3 className="text-sm font-medium text-[#37352F] mb-3">수강 반</h3>
+          <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg">
+            <div
+              className="w-3 h-3 rounded-full"
               style={{ backgroundColor: student.class_color }}
             />
-            {student.class_name}
+            <span className="text-sm font-medium text-[#37352F]">
+              {student.class_name}
+            </span>
           </div>
-        </div>
-
-        {/* 정보 카드들 */}
-        <div className="space-y-3">
-          {/* 학교/학년 */}
-          <div className="bg-gray-50 rounded-lg p-3">
-            <div className="flex items-center gap-2 text-gray-500 text-sm mb-1">
-              <School className="w-4 h-4" />
-              <span>학교 / 학년</span>
-            </div>
-            <p className="text-[#37352F] font-medium pl-6">
-              {student.school || '미등록'} 
-              <span className="text-gray-400 mx-2">·</span> 
-              {gradeToText(student.grade)}
-            </p>
-          </div>
-
-          {/* 보호자 연락처 */}
-          <div className="bg-gray-50 rounded-lg p-3">
-            <div className="flex items-center gap-2 text-gray-500 text-sm mb-1">
-              <Phone className="w-4 h-4" />
-              <span>보호자 연락처</span>
-            </div>
-            {parentPhone ? (
-              <a 
-                href={`tel:${parentPhone}`}
-                className="flex items-center gap-2 pl-6 text-[#6366F1] font-medium hover:underline"
-              >
-                {parentPhone}
-              </a>
-            ) : (
-              <p className="text-gray-400 pl-6">등록된 연락처 없음</p>
-            )}
-          </div>
-
-          {/* 학생 연락처 */}
-          <div className="bg-gray-50 rounded-lg p-3">
-            <div className="flex items-center gap-2 text-gray-500 text-sm mb-1">
-              <User className="w-4 h-4" />
-              <span>학생 연락처</span>
-            </div>
-            {student.student_phone ? (
-              <a 
-                href={`tel:${student.student_phone}`}
-                className="flex items-center gap-2 pl-6 text-[#6366F1] font-medium hover:underline"
-              >
-                {student.student_phone}
-              </a>
-            ) : (
-              <p className="text-gray-400 pl-6">등록된 연락처 없음</p>
-            )}
-          </div>
-
-          {/* 주소 */}
-          {student.address && (
-            <div className="bg-gray-50 rounded-lg p-3">
-              <div className="flex items-center gap-2 text-gray-500 text-sm mb-1">
-                <MapPin className="w-4 h-4" />
-                <span>주소</span>
-              </div>
-              <p className="text-[#37352F] pl-6">{student.address}</p>
-            </div>
-          )}
-
-          {/* 학생 특이사항 */}
-          <div className={`rounded-lg p-3 ${
-            student.memo 
-              ? 'bg-amber-50 border border-amber-200' 
-              : 'bg-gray-50'
-          }`}>
-            <div className={`flex items-center gap-2 text-sm mb-1 ${
-              student.memo ? 'text-amber-600' : 'text-gray-500'
-            }`}>
-              <FileText className="w-4 h-4" />
-              <span>학생 특이사항</span>
-            </div>
-            {student.memo ? (
-              <p className="text-amber-800 pl-6 whitespace-pre-wrap leading-relaxed">
-                {student.memo}
-              </p>
-            ) : (
-              <p className="text-gray-400 pl-6">등록된 특이사항 없음</p>
-            )}
-          </div>
-        </div>
+        </section>
       </div>
     </div>
   );

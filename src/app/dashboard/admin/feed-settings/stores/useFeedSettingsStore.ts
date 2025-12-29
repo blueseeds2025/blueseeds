@@ -6,7 +6,7 @@ import { arrayMove } from '@dnd-kit/sortable';
 import { toast } from 'sonner';
 
 import type { FeedConfig, OptionSet, Option, ReportCategory, TemplateType } from '@/types/feed-settings';
-import { SCORE_STEP, MAX_RETRY_ATTEMPTS, FEED_TEMPLATES, TEMPLATE_TYPE_LABEL } from '../feedSettings.constants';
+import { SCORE_STEP, MAX_RETRY_ATTEMPTS, FEED_TEMPLATES, TEMPLATE_TYPE_LABEL, TOAST_MESSAGES } from '../feedSettings.constants';
 
 // Server Actions
 import {
@@ -269,7 +269,7 @@ export const useFeedSettingsStore = create<FeedSettingsState>((set, get) => ({
   updateSetName: async (setId, newName) => {
     const name = newName.trim();
     if (!name) {
-      toast.error('이름을 입력하세요');
+      toast.error(TOAST_MESSAGES.ERR_NO_NAME);
       return false;
     }
 
@@ -325,7 +325,7 @@ export const useFeedSettingsStore = create<FeedSettingsState>((set, get) => ({
     const result = await changeOptionSetCategory(targetSet.id, newCategory);
 
     if (result.ok) {
-      toast.success('AI 리포트 영역이 변경되었습니다');
+      toast.success(TOAST_MESSAGES.CATEGORY_CHANGED);
       return true;
     } else {
       toast.error(result.message);
@@ -344,7 +344,7 @@ export const useFeedSettingsStore = create<FeedSettingsState>((set, get) => ({
   duplicateSet: async (sourceSet) => {
     const { activeConfig } = get();
     if (!activeConfig) {
-      toast.error('설정을 찾을 수 없습니다');
+      toast.error(TOAST_MESSAGES.ERR_NO_CONFIG);
       return null;
     }
 
@@ -592,7 +592,7 @@ export const useFeedSettingsStore = create<FeedSettingsState>((set, get) => ({
       activeConfig = get().activeConfig;
       
       if (!activeConfig) {
-        toast.error('설정을 찾을 수 없습니다');
+        toast.error(TOAST_MESSAGES.ERR_NO_CONFIG);
         return;
       }
     }
@@ -643,7 +643,7 @@ export const useFeedSettingsStore = create<FeedSettingsState>((set, get) => ({
     });
     expandedSetsCallback?.clear();
 
-    toast.success('템플릿이 적용되었습니다');
+    toast.success(TOAST_MESSAGES.TEMPLATE_APPLIED);
   },
 
   setCustomTemplate: (scoringType) => {
@@ -658,7 +658,7 @@ export const useFeedSettingsStore = create<FeedSettingsState>((set, get) => ({
   addItemWithTemplate: async (template, itemName, itemCategory) => {
     const { activeConfig } = get();
     if (!activeConfig) {
-      toast.error('설정을 찾을 수 없습니다');
+      toast.error(TOAST_MESSAGES.ERR_NO_CONFIG);
       return null;
     }
 
