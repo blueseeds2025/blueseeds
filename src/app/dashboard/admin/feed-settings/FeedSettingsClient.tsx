@@ -10,7 +10,7 @@ import {
   Languages,
   Calculator,
   FolderOpen,
-  Trash2,
+  Archive,
 } from 'lucide-react';
 import { PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { createBrowserClient } from '@supabase/ssr';
@@ -50,6 +50,7 @@ import {
   getTenantSettings,
   updateBasicSettings,
   updateMakeupSettings,
+  updateOptionSetWeeklyStats,
   type BasicSettings,
 } from './actions/feed-settings.actions';
 
@@ -156,6 +157,7 @@ export default function FeedSettingsClient() {
     updateSetName,
     changeSetCategory,
     duplicateSet,
+    updateSetWeeklyStats,
     handleOptionDragEnd,
     updateOption,
     deleteOption,
@@ -339,6 +341,24 @@ export default function FeedSettingsClient() {
     }
   }, [changeSetCategory, ui]);
 
+  // 주간 리포트 포함 여부 토글
+  const handleToggleWeeklyStats = useCallback(async (set: typeof optionSets[0]) => {
+    const newValue = !(set.is_in_weekly_stats ?? true);
+    
+    // Optimistic update (즉시 UI 반영)
+    updateSetWeeklyStats(set.id, newValue);
+    
+    // 백그라운드에서 서버 저장
+    const result = await updateOptionSetWeeklyStats(set.id, newValue, set.stats_category || null);
+    if (result.ok) {
+      toast.success(newValue ? '주간 리포트에 포함됩니다' : '주간 리포트에서 제외됩니다', { duration: 2000 });
+    } else {
+      // 실패시 롤백
+      updateSetWeeklyStats(set.id, !newValue);
+      toast.error('설정 저장에 실패했습니다');
+    }
+  }, [updateSetWeeklyStats]);
+
   const handleDuplicateSet = useCallback(async (set: typeof optionSets[0]) => {
     const newSet = await duplicateSet(set);
     if (newSet) {
@@ -406,11 +426,11 @@ export default function FeedSettingsClient() {
     }
   }, [addItemWithTemplate, ui]);
 
-  const handleResetSettings = useCallback(async () => {
+  const handleArchiveAllSettings = useCallback(async () => {
     const ok = await confirm({
-      title: '전체 삭제',
-      description: '기존 설정이 모두 삭제(보관)됩니다.\n계속하시겠습니까?',
-      confirmLabel: '삭제',
+      title: '전체 비활성화',
+      description: '모든 평가항목이 비활성화(보관)됩니다.\n기존 데이터는 유지되며, 리포트에서도 조회 가능합니다.\n\n계속하시겠습니까?',
+      confirmLabel: '비활성화',
       variant: 'danger',
     });
     if (!ok) return;
@@ -422,6 +442,7 @@ export default function FeedSettingsClient() {
     setShowWizard(false);
     ui.closeAddItemForm();
     setCurrentTemplate(null);
+    toast.success('모든 평가항목이 비활성화되었습니다');
   }, [archiveAllCurrentSets, clearLastAppliedPreset, confirm, setCurrentTemplate, setShowWizard, ui]);
 
   const handleEmptyTemplateSelect = useCallback((key: 'custom' | 'basic' | 'english' | 'text') => {
@@ -481,11 +502,11 @@ export default function FeedSettingsClient() {
           <Button
             variant="outline"
             size="sm"
-            onClick={handleResetSettings}
-            className="border-red-200 text-red-600 hover:text-red-700 hover:bg-red-50"
+            onClick={handleArchiveAllSettings}
+            className="border-amber-200 text-amber-600 hover:text-amber-700 hover:bg-amber-50"
           >
-            <Trash2 className="w-4 h-4 mr-1" />
-            전체 삭제
+            <Archive className="w-4 h-4 mr-1" />
+            전체 비활성화
           </Button>
         </div>
       </div>
@@ -571,6 +592,7 @@ export default function FeedSettingsClient() {
               onDuplicate={() => void handleDuplicateSet(set)}
               onDeleteSet={() => void handleDeleteSet(set)}
               onChangeCategory={(cat) => void handleChangeSetCategory(set, cat)}
+              onToggleWeeklyStats={() => void handleToggleWeeklyStats(set)}
               confirm={confirm}
               sensors={sensors}
               onDragEnd={(event) => void handleOptionDragEnd(set.id, event)}

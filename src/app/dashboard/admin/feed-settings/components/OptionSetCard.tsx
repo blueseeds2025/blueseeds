@@ -62,6 +62,9 @@ type Props = {
   // category change
   onChangeCategory: (cat: ReportCategory) => void;
 
+  // 주간 리포트 설정
+  onToggleWeeklyStats: () => void;
+
   // confirm dialog (모달용)
   confirm: (options: {
     title: string;
@@ -103,6 +106,8 @@ export default function OptionSetCard({
   onDeleteSet,
 
   onChangeCategory,
+  onToggleWeeklyStats,
+  onChangeStatsCategory,
 
   confirm,
 
@@ -291,6 +296,24 @@ export default function OptionSetCard({
                   </button>
                 );
               })}
+            </div>
+          </div>
+
+          {/* 주간 리포트 설정 */}
+          <div className="mt-4 p-4 bg-indigo-50/50 rounded-lg border border-indigo-100">
+            <div className="flex items-center gap-3">
+              <Checkbox
+                id={`weekly-stats-${set.id}`}
+                checked={set.is_in_weekly_stats ?? true}
+                onCheckedChange={() => onToggleWeeklyStats()}
+                className="w-4 h-4 border-gray-300 data-[state=checked]:bg-indigo-600 data-[state=checked]:border-indigo-600"
+              />
+              <label 
+                htmlFor={`weekly-stats-${set.id}`}
+                className="text-sm text-gray-700 cursor-pointer"
+              >
+                📊 주간 리포트에 포함
+              </label>
             </div>
           </div>
 

@@ -24,6 +24,9 @@ export interface OptionSet {
   is_active: boolean;
   deleted_at: string | null;
   default_report_category?: ReportCategory;
+  // 주간 리포트 설정
+  is_in_weekly_stats?: boolean;
+  stats_category?: string | null;
 }
 
 export interface Option {

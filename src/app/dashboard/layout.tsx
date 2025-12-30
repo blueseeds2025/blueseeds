@@ -17,7 +17,8 @@ import {
   Package,
   UserX,
   GraduationCap,
-  School
+  School,
+  ClipboardList
 } from 'lucide-react';
 import type { Database } from '@/lib/supabase/types';
 
@@ -84,6 +85,12 @@ export default function DashboardLayout({
       icon: UserX,
       label: '결석·보강', 
       href: '/dashboard/absence',
+      show: true 
+    },
+    { 
+      icon: ClipboardList,
+      label: '리포트', 
+      href: userRole === 'owner' ? '/dashboard/admin/reports' : '/dashboard/teacher/reports',
       show: true 
     },
     { 

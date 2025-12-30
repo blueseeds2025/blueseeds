@@ -53,6 +53,7 @@ interface FeedSettingsState {
   updateSetName: (setId: string, newName: string) => Promise<boolean>;
   changeSetCategory: (set: OptionSet, newCategory: ReportCategory) => Promise<boolean>;
   duplicateSet: (set: OptionSet) => Promise<OptionSet | null>;
+  updateSetWeeklyStats: (setId: string, isInWeeklyStats: boolean) => void;
   
   // Option CRUD
   handleOptionDragEnd: (setId: string, event: DragEndEvent) => Promise<void>;
@@ -376,6 +377,15 @@ export const useFeedSettingsStore = create<FeedSettingsState>((set, get) => ({
     expandedSetsCallback?.add(newSet.id);
 
     return newSet;
+  },
+
+  // 주간 리포트 설정 (로컬만 업데이트, 서버는 FeedSettingsClient에서)
+  updateSetWeeklyStats: (setId, isInWeeklyStats) => {
+    set((state) => ({
+      optionSets: state.optionSets.map((s) =>
+        s.id === setId ? { ...s, is_in_weekly_stats: isInWeeklyStats } : s
+      ),
+    }));
   },
 
   // ========== Option CRUD ==========

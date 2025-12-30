@@ -874,3 +874,33 @@ export async function updateMakeupSettings(
     return { ok: false, message: '설정 저장에 실패했습니다' };
   }
 }
+
+/**
+ * OptionSet 주간 리포트 설정 변경
+ */
+export async function updateOptionSetWeeklyStats(
+  setId: string,
+  isInWeeklyStats: boolean,
+  statsCategory: string | null
+): Promise<ActionResult> {
+  try {
+    const sb = await supabaseServer();
+    const { tenantId } = await getTenantIdOrThrow(sb);
+
+    const { error } = await sb
+      .from('feed_option_sets')
+      .update({ 
+        is_in_weekly_stats: isInWeeklyStats,
+        stats_category: statsCategory || null,
+      })
+      .eq('id', setId)
+      .eq('tenant_id', tenantId);
+
+    if (error) throw error;
+
+    return { ok: true };
+  } catch (error) {
+    console.error('updateOptionSetWeeklyStats error:', error);
+    return { ok: false, message: '주간 리포트 설정 변경에 실패했습니다' };
+  }
+}
