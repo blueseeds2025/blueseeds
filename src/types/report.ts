@@ -20,8 +20,8 @@ export interface ReportSettings {
   tenant_id: string;
   strength_threshold: number;   // 강점 기준 (기본 80)
   weakness_threshold: number;   // 보완 기준 (기본 75)
-  created_at: string;
-  updated_at: string;
+  created_at: string | null;    // ✅ nullable로 변경
+  updated_at: string | null;    // ✅ nullable로 변경
   deleted_at: string | null;
 }
 
@@ -56,7 +56,8 @@ export type CategoryStat = ScoreCategoryStat | TextCategoryStat;
 export interface StrengthWeaknessAnalysis {
   strengths: string[];        // 강점 카테고리 목록
   weaknesses: string[];       // 보완 카테고리 목록
-  nextGoal: string;           // 다음 목표 문구
+  strengthThreshold: number;  // 강점 기준점
+  weaknessThreshold: number;  // 보완 기준점
 }
 
 // 항목 변경점 정보
@@ -71,7 +72,7 @@ export interface WeeklyReportData {
   student: {
     id: string;
     name: string;
-    displayCode: string;
+    displayCode: string | null;  // ✅ nullable로 변경
   };
   period: {
     startDate: string;        // YYYY-MM-DD
@@ -80,8 +81,9 @@ export interface WeeklyReportData {
   categoryStats: CategoryStat[];
   overallAvgScore: number | null;    // 전체 평균 (점수형만)
   analysis: StrengthWeaknessAnalysis;
-  generatedAt: string;
-  configChanges?: ConfigChange[];    // 항목 변경점 (있으면)
+  feedCount: number;                  // ✅ 추가
+  messageTone: MessageTone;           // ✅ 추가
+  configChanges?: ConfigChange[];     // 항목 변경점 (있으면)
 }
 
 // ============================================================================

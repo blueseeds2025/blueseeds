@@ -65,7 +65,7 @@ export function StudentSelector({
         <select
           value={selectedClassId || ''}
           onChange={(e) => handleClassChange(e.target.value)}
-          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6366F1] focus:border-transparent"
         >
           <option value="">반을 선택하세요</option>
           {classes.map((cls) => (
@@ -88,7 +88,7 @@ export function StudentSelector({
             </label>
             <button
               onClick={handleSelectAll}
-              className="text-sm text-indigo-600 hover:text-indigo-700"
+              className="text-sm text-[#6366F1] hover:text-[#4F46E5]"
             >
               {selectAll ? '전체 해제' : '전체 선택'}
             </button>
@@ -96,7 +96,7 @@ export function StudentSelector({
           
           {isLoading ? (
             <div className="py-8 text-center text-gray-500">
-              <div className="inline-block animate-spin rounded-full h-6 w-6 border-2 border-gray-300 border-t-indigo-600" />
+              <div className="inline-block animate-spin rounded-full h-6 w-6 border-2 border-gray-300 border-t-[#6366F1]" />
               <p className="mt-2 text-sm">학생 목록을 불러오는 중...</p>
             </div>
           ) : students.length === 0 ? (
@@ -113,12 +113,12 @@ export function StudentSelector({
                     onClick={() => handleStudentToggle(student.id)}
                     className={`flex items-center gap-2 px-3 py-2 text-sm rounded-lg border transition-colors text-left ${
                       isSelected
-                        ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                        ? 'bg-[#EEF2FF] border-[#A5B4FC] text-[#4F46E5]'
                         : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
                     }`}
                   >
                     <span className={`w-4 h-4 rounded border flex items-center justify-center ${
-                      isSelected ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300'
+                      isSelected ? 'bg-[#6366F1] border-[#6366F1]' : 'border-gray-300'
                     }`}>
                       {isSelected && (
                         <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">

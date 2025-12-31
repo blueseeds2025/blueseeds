@@ -22,6 +22,7 @@ export default function TeachersClient() {
     handleSaveFeedPermissions,
     handleAssignClass,
     handleUnassignClass,
+    handleUpdateReportPermission,
   } = useTeachers();
 
   // ============ 담당 반 카운트 (로컬) ============
@@ -110,6 +111,7 @@ export default function TeachersClient() {
                   onSaveFeedPermissions={handleSaveFeedPermissions}
                   onAssignClass={handleAssignClass}
                   onUnassignClass={handleUnassignClass}
+                  onUpdateReportPermission={handleUpdateReportPermission}
                 />
               )}
             </div>

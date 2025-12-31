@@ -107,7 +107,6 @@ export default function OptionSetCard({
 
   onChangeCategory,
   onToggleWeeklyStats,
-  onChangeStatsCategory,
 
   confirm,
 

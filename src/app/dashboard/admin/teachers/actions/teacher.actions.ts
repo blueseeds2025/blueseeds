@@ -5,7 +5,7 @@ import { createServerClient } from '@supabase/ssr';
 import { revalidatePath } from 'next/cache';
 
 import type { Database } from '@/lib/supabase/types';
-import type { ActionResult, Teacher, TeacherWithDetails, FeedPermission, AssignedClass, FeedOptionSet, ClassInfo } from '../types';
+import type { ActionResult, Teacher, TeacherWithDetails, TeacherPermissions, FeedPermission, AssignedClass, FeedOptionSet, ClassInfo } from '../types';
 
 // =======================
 // Supabase Helper
@@ -148,8 +148,27 @@ export async function getTeacherDetails(teacherId: string): Promise<TeacherWithD
     console.error('[getTeacherDetails] optionSet error:', optionSetErr);
   }
 
-  // 4. 교사의 피드 권한 목록
-  const { data: permissions, error: permErr } = await sb
+  // 4. 교사의 기능 권한 조회 (teacher_permissions)
+  const { data: teacherPerm, error: teacherPermErr } = await sb
+    .from('teacher_permissions')
+    .select('id, can_view_reports')
+    .eq('teacher_id', teacherId)
+    .eq('tenant_id', tenantId)
+    .is('deleted_at', null)
+    .maybeSingle();
+
+  if (teacherPermErr) {
+    console.error('[getTeacherDetails] teacherPerm error:', teacherPermErr);
+  }
+
+  // 기능 권한 (없으면 기본값)
+  const permissions: TeacherPermissions = {
+    id: teacherPerm?.id ?? null,
+    can_view_reports: teacherPerm?.can_view_reports ?? true,
+  };
+
+  // 5. 교사의 피드 권한 목록 (Premium)
+  const { data: feedPerms, error: permErr } = await sb
     .from('teacher_feed_permissions')
     .select('id, option_set_id, is_allowed')
     .eq('teacher_id', teacherId)
@@ -157,12 +176,12 @@ export async function getTeacherDetails(teacherId: string): Promise<TeacherWithD
     .is('deleted_at', null);
 
   if (permErr) {
-    console.error('[getTeacherDetails] permissions error:', permErr);
+    console.error('[getTeacherDetails] feedPerms error:', permErr);
   }
 
   // 권한 맵 생성
   const permissionMap = new Map<string, { id: string; is_allowed: boolean }>();
-  for (const p of permissions ?? []) {
+  for (const p of feedPerms ?? []) {
 permissionMap.set(p.option_set_id, { id: p.id, is_allowed: p.is_allowed ?? true });  }
 
   // 피드 권한 목록 생성 (전체 항목 기준, 권한 없으면 기본값 true)
@@ -179,6 +198,7 @@ permissionMap.set(p.option_set_id, { id: p.id, is_allowed: p.is_allowed ?? true 
   return {
     ...(teacher as Teacher),
     assignedClasses,
+    permissions,
     feedPermissions,
   };
 }
@@ -446,4 +466,112 @@ export async function listFeedOptionSets(): Promise<FeedOptionSet[]> {
   }
 
   return (data ?? []) as FeedOptionSet[];
+}
+
+// =======================
+// Teacher Permissions (기능 권한)
+// =======================
+
+/** 리포트 조회 권한 저장 */
+export async function updateTeacherReportPermission(
+  teacherId: string,
+  canViewReports: boolean
+): Promise<ActionResult> {
+  try {
+    const sb = await supabaseServer();
+    const { tenantId, role } = await getTenantIdOrThrow(sb);
+
+    if (role !== 'owner') {
+      return { ok: false, message: '권한이 없습니다' };
+    }
+
+    // 기존 레코드 확인
+    const { data: existing } = await sb
+      .from('teacher_permissions')
+      .select('id')
+      .eq('teacher_id', teacherId)
+      .eq('tenant_id', tenantId)
+      .is('deleted_at', null)
+      .maybeSingle();
+
+    if (existing) {
+      // 업데이트
+      const { error } = await sb
+        .from('teacher_permissions')
+        .update({ 
+          can_view_reports: canViewReports,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id)
+        .eq('tenant_id', tenantId);
+
+      if (error) {
+        console.error('[updateTeacherReportPermission] update error:', error);
+        return { ok: false, message: error.message };
+      }
+    } else {
+      // 새로 생성
+      const { error } = await sb
+        .from('teacher_permissions')
+        .insert({
+          tenant_id: tenantId,
+          teacher_id: teacherId,
+          can_view_reports: canViewReports,
+        });
+
+      if (error) {
+        console.error('[updateTeacherReportPermission] insert error:', error);
+        return { ok: false, message: error.message };
+      }
+    }
+
+    revalidatePath('/dashboard/admin/teachers');
+    return { ok: true };
+  } catch (e: any) {
+    console.error('[updateTeacherReportPermission] fatal:', e);
+    return { ok: false, message: e?.message ?? '서버 오류' };
+  }
+}
+
+/** 선생님 본인의 기능 권한 조회 (teacher용) */
+export async function getMyPermissions(): Promise<ActionResult<TeacherPermissions>> {
+  try {
+    const sb = await supabaseServer();
+    const { tenantId, userId, role } = await getTenantIdOrThrow(sb);
+
+    // teacher만 사용 (owner는 모든 권한 있음)
+    if (role !== 'teacher') {
+      return { 
+        ok: true, 
+        data: { 
+          id: null, 
+          can_view_reports: true,  // owner는 항상 true
+        } 
+      };
+    }
+
+    const { data, error } = await sb
+      .from('teacher_permissions')
+      .select('id, can_view_reports')
+      .eq('teacher_id', userId)
+      .eq('tenant_id', tenantId)
+      .is('deleted_at', null)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[getMyPermissions] error:', error);
+      return { ok: false, message: error.message };
+    }
+
+    return {
+      ok: true,
+      data: {
+        id: data?.id ?? null,
+        can_view_reports: data?.can_view_reports ?? true,  // 기본값 true
+      },
+    };
+  } catch (e: any) {
+    console.error('[getMyPermissions] fatal:', e);
+    return { ok: false, message: e?.message ?? '서버 오류' };
+  }
 }

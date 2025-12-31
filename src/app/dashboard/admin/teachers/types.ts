@@ -15,10 +15,11 @@ export type Teacher = {
   deleted_at: string | null;
 };
 
-/** 교사 상세 정보 (담당 반, 피드 권한 포함) */
+/** 교사 상세 정보 (담당 반, 기능 권한, 피드 권한 포함) */
 export type TeacherWithDetails = Teacher & {
   assignedClasses: AssignedClass[];
-  feedPermissions: FeedPermission[];
+  permissions: TeacherPermissions;      // 기능 권한 (Basic)
+  feedPermissions: FeedPermission[];    // 피드 항목 권한 (Premium)
 };
 
 /** 담당 반 정보 */
@@ -31,12 +32,23 @@ export type AssignedClass = {
   is_active: boolean;
 };
 
-/** 피드 항목 권한 */
+/** 피드 항목 권한 (Premium) */
 export type FeedPermission = {
   id: string | null;  // null이면 아직 설정 안 됨
   option_set_id: string;
   option_set_name: string;
   is_allowed: boolean;
+};
+
+/** 선생님 기능 권한 (Basic + Premium) */
+export type TeacherPermissions = {
+  id: string | null;
+  // Basic
+  can_view_reports: boolean;
+  // Premium (나중에 추가)
+  // can_customize_feed_items: boolean;
+  // can_use_schedule: boolean;
+  // can_use_inventory: boolean;
 };
 
 /** 피드 항목 (권한 설정용) */

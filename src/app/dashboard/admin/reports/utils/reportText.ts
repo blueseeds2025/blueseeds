@@ -6,7 +6,8 @@ import {
   getScoreEmoji,
   getCategoryEmoji,
   countToDots, 
-  REPORT_INTRO_TEMPLATES 
+  REPORT_INTRO_TEMPLATES,
+  PRAISE_TEMPLATES
 } from '@/types/report';
 
 // ============================================================================
@@ -16,6 +17,25 @@ import {
 function formatDateKorean(dateStr: string): string {
   const date = new Date(dateStr);
   return `${date.getMonth() + 1}월${date.getDate()}일`;
+}
+
+// ============================================================================
+// 다음 목표 생성 헬퍼
+// ============================================================================
+
+function generateNextGoal(weaknesses: string[], tone: MessageTone): string {
+  if (weaknesses.length === 0) {
+    // 보완점 없으면 랜덤 칭찬
+    const praiseList = PRAISE_TEMPLATES[tone];
+    const randomIndex = Math.floor(Math.random() * praiseList.length);
+    return praiseList[randomIndex];
+  }
+  
+  // 보완점 있으면 집중 학습 목표
+  const goalPrefix = tone === 'formal' ? '집중 학습 필요: ' 
+                   : tone === 'friendly' ? '다음엔 이것만 신경 쓰면 돼요: '
+                   : '';
+  return goalPrefix + weaknesses.join(', ') + (tone === 'formal' ? '' : ' 집중 학습');
 }
 
 // ============================================================================
@@ -37,7 +57,7 @@ function formatCategoryStat(stat: CategoryStat, template: ReportStyleTemplate): 
         return `${emoji} ${stat.statsCategory} ${stat.avgScore} ${gauge}`;
       }
       case 'slider': {
-        // 🟢 학습 태도 93 ━━━━━━━━●─
+        // 🟢 학습 태도 93 ━━━━━━━━◉─
         const emoji = getScoreEmoji(stat.avgScore);
         const gauge = scoreToSliderGauge(stat.avgScore);
         return `${emoji} ${stat.statsCategory} ${stat.avgScore} ${gauge}`;
@@ -110,13 +130,15 @@ export function generateReportText(
     ? analysis.strengths.join(', ')
     : '-';
   
+  const nextGoal = generateNextGoal(analysis.weaknesses, tone);
+  
   let analysisSection = `\n\n✅ 잘하는 점: ${strengthsText}`;
   
   if (analysis.weaknesses.length > 0) {
     analysisSection += `\n⚡ 노력할 점: ${analysis.weaknesses.join(', ')}`;
-    analysisSection += `\n🎯 다음 목표: ${analysis.nextGoal}`;
+    analysisSection += `\n🎯 다음 목표: ${nextGoal}`;
   } else {
-    analysisSection += `\n🎯 ${analysis.nextGoal}`;
+    analysisSection += `\n🎯 ${nextGoal}`;
   }
   
   // 5. 전체 조합
@@ -159,13 +181,15 @@ function generateSimpleReport(
     ? analysis.strengths.join(', ')
     : '-';
   
+  const nextGoal = generateNextGoal(analysis.weaknesses, tone);
+  
   text += `\n✅ 잘하는 점: ${strengthsText}\n`;
   
   if (analysis.weaknesses.length > 0) {
     text += `⚡ 노력할 점: ${analysis.weaknesses.join(', ')}\n`;
-    text += `🎯 다음 목표: ${analysis.nextGoal}`;
+    text += `🎯 다음 목표: ${nextGoal}`;
   } else {
-    text += `🎯 ${analysis.nextGoal}`;
+    text += `🎯 ${nextGoal}`;
   }
   
   return text;
@@ -207,13 +231,15 @@ export function generateReportTextShort(
   }
   
   // 잘하는 점/노력할 점
+  const nextGoal = generateNextGoal(analysis.weaknesses, tone);
+  
   text += `\n\n✅ 잘하는 점: ${analysis.strengths.length > 0 ? analysis.strengths.join(', ') : '-'}`;
   
   if (analysis.weaknesses.length > 0) {
     text += `\n⚡ 노력할 점: ${analysis.weaknesses.join(', ')}`;
-    text += `\n🎯 다음 목표: ${analysis.nextGoal}`;
+    text += `\n🎯 다음 목표: ${nextGoal}`;
   } else {
-    text += `\n🎯 ${analysis.nextGoal}`;
+    text += `\n🎯 ${nextGoal}`;
   }
   
   return text;

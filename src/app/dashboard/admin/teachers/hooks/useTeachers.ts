@@ -14,6 +14,7 @@ import {
   unassignClass,
   getAvailableClasses,
   listFeedOptionSets,
+  updateTeacherReportPermission,
 } from '../actions/teacher.actions';
 
 export function useTeachers() {
@@ -150,6 +151,28 @@ export function useTeachers() {
     }
   }, [selectedTeacher]);
 
+  // ============ Report Permission ============
+  const handleUpdateReportPermission = useCallback(async (
+    canViewReports: boolean
+  ): Promise<boolean> => {
+    if (!selectedTeacher) return false;
+
+    const result = await updateTeacherReportPermission(selectedTeacher.id, canViewReports);
+    
+    if (result.ok) {
+      toast.success(canViewReports ? '리포트 조회 허용' : '리포트 조회 차단');
+      // 로컬 상태 업데이트
+      setSelectedTeacher((prev) => prev ? { 
+        ...prev, 
+        permissions: { ...prev.permissions, can_view_reports: canViewReports }
+      } : null);
+      return true;
+    } else {
+      toast.error(result.message);
+      return false;
+    }
+  }, [selectedTeacher]);
+
   // ============ Return ============
   return {
     // 상태
@@ -167,5 +190,6 @@ export function useTeachers() {
     handleSaveFeedPermissions,
     handleAssignClass,
     handleUnassignClass,
+    handleUpdateReportPermission,
   };
 }

@@ -38,7 +38,7 @@ export function PeriodSelector({ startDate, endDate, onDateChange }: PeriodSelec
             onClick={() => handlePresetClick(key)}
             className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
               activePreset === key
-                ? 'bg-indigo-600 text-white'
+                ? 'bg-[#6366F1] text-white'
                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
             }`}
           >
@@ -49,7 +49,7 @@ export function PeriodSelector({ startDate, endDate, onDateChange }: PeriodSelec
           onClick={() => setActivePreset('custom')}
           className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
             activePreset === 'custom'
-              ? 'bg-indigo-600 text-white'
+              ? 'bg-[#6366F1] text-white'
               : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
           }`}
         >
@@ -66,7 +66,7 @@ export function PeriodSelector({ startDate, endDate, onDateChange }: PeriodSelec
             value={startDate}
             onChange={(e) => handleDateChange('start', e.target.value)}
             max={endDate}
-            className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6366F1] focus:border-transparent"
           />
         </div>
         <span className="text-gray-400">~</span>
@@ -78,7 +78,7 @@ export function PeriodSelector({ startDate, endDate, onDateChange }: PeriodSelec
             onChange={(e) => handleDateChange('end', e.target.value)}
             min={startDate}
             max={formatDateISO(new Date())}
-            className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6366F1] focus:border-transparent"
           />
         </div>
       </div>

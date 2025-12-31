@@ -22,12 +22,31 @@ import {
 } from 'lucide-react';
 import type { Database } from '@/lib/supabase/types';
 
+// 메뉴 스켈레톤 컴포넌트
+function MenuSkeleton({ isSidebarOpen }: { isSidebarOpen: boolean }) {
+  return (
+    <div className="p-4 space-y-2">
+      {[...Array(8)].map((_, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-3 px-3 py-2"
+        >
+          <div className="w-5 h-5 bg-gray-200 rounded animate-pulse" />
+          {isSidebarOpen && (
+            <div className="h-4 bg-gray-200 rounded animate-pulse" style={{ width: `${60 + Math.random() * 40}px` }} />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [userRole, setUserRole] = useState<string>('');
+  const [userRole, setUserRole] = useState<string | null>(null); // null = 로딩 중
   const [userName, setUserName] = useState<string>('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   
@@ -51,7 +70,13 @@ export default function DashboardLayout({
         if (profile) {
           setUserRole(profile.role);
           setUserName(profile.display_name);
+        } else {
+          // 프로필이 없는 경우에도 로딩 완료 처리
+          setUserRole('');
         }
+      } else {
+        // 로그인 안 된 경우
+        setUserRole('');
       }
     };
     getUserInfo();
@@ -62,7 +87,8 @@ export default function DashboardLayout({
     router.push('/auth/login');
   };
 
-  const menuItems = [
+  // role이 확정된 후에만 메뉴 아이템 생성
+  const menuItems = userRole ? [
     { 
       icon: Home, 
       label: '대시보드', 
@@ -141,7 +167,9 @@ export default function DashboardLayout({
       href: '/dashboard/settings',
       show: userRole === 'owner' 
     },
-  ];
+  ] : [];
+
+  const isLoading = userRole === null;
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -163,43 +191,59 @@ export default function DashboardLayout({
         </div>
 
         <div className="p-4 border-b">
-          <div className={`text-sm text-gray-600 ${!isSidebarOpen && 'hidden'}`}>
-            {userName}
-          </div>
-          <div className={`text-xs text-gray-400 ${!isSidebarOpen && 'hidden'}`}>
-            {userRole === 'owner' ? '원장' : '교사'}
-          </div>
+          {isLoading ? (
+            // 유저 정보 스켈레톤
+            <div className={`${!isSidebarOpen && 'hidden'}`}>
+              <div className="h-4 w-20 bg-gray-200 rounded animate-pulse mb-1" />
+              <div className="h-3 w-12 bg-gray-200 rounded animate-pulse" />
+            </div>
+          ) : (
+            <>
+              <div className={`text-sm text-gray-600 ${!isSidebarOpen && 'hidden'}`}>
+                {userName}
+              </div>
+              <div className={`text-xs text-gray-400 ${!isSidebarOpen && 'hidden'}`}>
+                {userRole === 'owner' ? '원장' : '교사'}
+              </div>
+            </>
+          )}
         </div>
 
-        <nav className="p-4">
-          {menuItems.filter(item => item.show).map((item) => {
-            const Icon = item.icon;
-            const isActive = pathname === item.href;
-            
-            return (
-              <button
-                key={item.href}
-                onClick={() => router.push(item.href)}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg mb-1 transition-colors ${
-                  isActive 
-                    ? 'bg-blue-50 text-blue-600' 
-                    : 'hover:bg-gray-100 text-gray-700'
-                }`}
-              >
-                <Icon size={20} />
-                <span className={`${!isSidebarOpen && 'hidden'}`}>
-                  {item.label}
-                </span>
-              </button>
-            );
-          })}
-        </nav>
+        {/* 메뉴 영역 */}
+        {isLoading ? (
+          <MenuSkeleton isSidebarOpen={isSidebarOpen} />
+        ) : (
+          <nav className="p-4">
+            {menuItems.filter(item => item.show).map((item) => {
+              const Icon = item.icon;
+              const isActive = pathname === item.href;
+              
+              return (
+                <button
+                  key={item.href}
+                  onClick={() => router.push(item.href)}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg mb-1 transition-colors ${
+                    isActive 
+                      ? 'bg-blue-50 text-blue-600' 
+                      : 'hover:bg-gray-100 text-gray-700'
+                  }`}
+                >
+                  <Icon size={20} />
+                  <span className={`${!isSidebarOpen && 'hidden'}`}>
+                    {item.label}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        )}
 
         <div className="absolute bottom-4 left-4 right-4">
           <Button
             onClick={handleLogout}
             variant="outline"
             className={`w-full ${!isSidebarOpen && 'px-2'}`}
+            disabled={isLoading}
           >
             <LogOut size={20} />
             <span className={`ml-2 ${!isSidebarOpen && 'hidden'}`}>

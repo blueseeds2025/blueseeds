@@ -11,6 +11,7 @@ import type {
   ReportSettings,
 } from '@/types/report';
 import { PRAISE_TEMPLATES } from '@/types/report';
+import { DEFAULT_STRENGTH_THRESHOLD, DEFAULT_WEAKNESS_THRESHOLD } from '../constants';
 
 // ============================================================================
 // 타입 정의
@@ -59,14 +60,14 @@ export async function getReportSettings(): Promise<ActionResult<ReportSettings &
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error || '인증 오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
     
     // report_settings 조회 (없으면 기본값)
     const { data: settings } = await supabase
       .from('report_settings')
-      .select('*')
+      .select('id, tenant_id, strength_threshold, weakness_threshold, created_at, updated_at, deleted_at')
       .eq('tenant_id', profile.tenant_id)
       .is('deleted_at', null)
       .single();
@@ -78,11 +79,11 @@ export async function getReportSettings(): Promise<ActionResult<ReportSettings &
       .eq('id', profile.tenant_id)
       .single();
     
-    const reportSettings: ReportSettings = settings || {
+    const reportSettings = settings || {
       id: '',
       tenant_id: profile.tenant_id,
-      strength_threshold: 80,
-      weakness_threshold: 75,
+      strength_threshold: DEFAULT_STRENGTH_THRESHOLD,
+      weakness_threshold: DEFAULT_WEAKNESS_THRESHOLD,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       deleted_at: null,
@@ -112,7 +113,7 @@ export async function updateReportSettings(params: {
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error || '인증 오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
     
@@ -131,7 +132,7 @@ export async function updateReportSettings(params: {
       }, {
         onConflict: 'tenant_id',
       })
-      .select()
+      .select('id, tenant_id, strength_threshold, weakness_threshold, created_at, updated_at, deleted_at')
       .single();
     
     if (error) throw error;
@@ -151,7 +152,7 @@ export async function updateMessageTone(tone: MessageTone): Promise<ActionResult
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error || '인증 오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
     
@@ -182,9 +183,24 @@ export async function getStudentsForReport(classId?: string): Promise<ActionResu
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error || '인증 오류가 발생했습니다' };
     }
-    const { supabase, profile } = ctx;
+    const { supabase, user, profile } = ctx;
+    
+    // teacher인 경우 can_view_reports 체크
+    if (profile.role === 'teacher') {
+      const { data: teacherPerm } = await supabase
+        .from('teacher_permissions')
+        .select('can_view_reports')
+        .eq('tenant_id', profile.tenant_id)
+        .eq('teacher_id', user.id)
+        .is('deleted_at', null)
+        .maybeSingle();
+      
+      if (teacherPerm && teacherPerm.can_view_reports === false) {
+        return { ok: false, message: '리포트 조회 권한이 없습니다' };
+      }
+    }
     
     if (classId) {
       // 특정 반의 학생들
@@ -218,7 +234,11 @@ export async function getStudentsForReport(classId?: string): Promise<ActionResu
       
       return { ok: true, data: students };
     } else {
-      // 전체 학생
+      // 전체 학생 (owner만)
+      if (profile.role !== 'owner' && profile.role !== 'admin') {
+        return { ok: false, message: '반을 선택해주세요' };
+      }
+      
       const { data, error } = await supabase
         .from('students')
         .select('id, name, display_code')
@@ -245,39 +265,51 @@ export async function getClassesForReport(): Promise<ActionResult<{ id: string; 
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error || '인증 오류가 발생했습니다' };
     }
-    const { supabase, profile } = ctx;
+    const { supabase, user, profile } = ctx;
     
-    let query = supabase
+    // teacher인 경우 can_view_reports 체크
+    if (profile.role === 'teacher') {
+      const { data: teacherPerm } = await supabase
+        .from('teacher_permissions')
+        .select('can_view_reports')
+        .eq('tenant_id', profile.tenant_id)
+        .eq('teacher_id', user.id)
+        .is('deleted_at', null)
+        .maybeSingle();
+      
+      if (teacherPerm && teacherPerm.can_view_reports === false) {
+        return { ok: false, message: '리포트 조회 권한이 없습니다' };
+      }
+      
+      // teacher는 담당 반만
+      const { data: assignments } = await supabase
+        .from('class_teachers')
+        .select('class_id, classes(id, name)')
+        .eq('tenant_id', profile.tenant_id)
+        .eq('teacher_id', user.id)
+        .eq('is_active', true)
+        .is('deleted_at', null);
+      
+      const classes = (assignments || [])
+        .filter(a => a.classes)
+        .map(a => {
+          const c = a.classes as { id: string; name: string };
+          return { id: c.id, name: c.name };
+        });
+      
+      return { ok: true, data: classes };
+    }
+    
+    // owner/admin은 전체 반
+    const { data, error } = await supabase
       .from('classes')
       .select('id, name')
       .eq('tenant_id', profile.tenant_id)
       .is('deleted_at', null)
       .order('name');
     
-    // 교사는 담당 반만
-    if (profile.role === 'teacher') {
-      const { data: assignments } = await supabase
-        .from('class_teachers')
-        .select('class_id')
-        .eq('tenant_id', profile.tenant_id)
-        .eq('teacher_id', ctx.user.id)
-        .eq('is_active', true)
-        .is('deleted_at', null);
-      
-      const classIds = (assignments || [])
-        .map(a => a.class_id)
-        .filter((id): id is string => id !== null);
-      
-      if (classIds.length === 0) {
-        return { ok: true, data: [] };
-      }
-      
-      query = query.in('id', classIds);
-    }
-    
-    const { data, error } = await query;
     if (error) throw error;
     
     return { ok: true, data: data || [] };
@@ -288,7 +320,7 @@ export async function getClassesForReport(): Promise<ActionResult<{ id: string; 
 }
 
 // ============================================================================
-// 주간 리포트 데이터 생성
+// 주간 리포트 생성 (개별)
 // ============================================================================
 
 export async function generateWeeklyReport(params: {
@@ -299,7 +331,7 @@ export async function generateWeeklyReport(params: {
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error || '인증 오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
     
@@ -320,8 +352,8 @@ export async function generateWeeklyReport(params: {
     // 2. 리포트 설정 조회
     const settingsResult = await getReportSettings();
     const settings = settingsResult.ok ? settingsResult.data : {
-      strength_threshold: 80,
-      weakness_threshold: 75,
+      strength_threshold: DEFAULT_STRENGTH_THRESHOLD,
+      weakness_threshold: DEFAULT_WEAKNESS_THRESHOLD,
       messageTone: 'friendly' as MessageTone,
     };
     
@@ -333,7 +365,7 @@ export async function generateWeeklyReport(params: {
       .eq('student_id', studentId)
       .gte('feed_date', startDate)
       .lte('feed_date', endDate)
-      .eq('is_makeup', false)  // 정규수업만
+      .eq('is_makeup', false)
       .order('feed_date', { ascending: true });
     
     if (feedsError) throw feedsError;
@@ -343,37 +375,37 @@ export async function generateWeeklyReport(params: {
     }
     
     const feedIds = feeds.map(f => f.id);
-    const feedDateMap = new Map(feeds.map(f => [f.id, f.feed_date]));
     
-    // 4. 피드 값 조회 (해당 기간에 실제 데이터가 있는 것만)
-    const { data: feedValues, error: valuesError } = await supabase
+    // 4. 사용된 set_id만 먼저 조회 (성능 최적화)
+    const { data: usedSetIdsData, error: setIdsError } = await supabase
       .from('feed_values')
-      .select('feed_id, set_id, option_id, score')
-      .in('feed_id', feedIds);
+      .select('set_id')
+      .in('feed_id', feedIds)
+      .not('set_id', 'is', null);
     
-    if (valuesError) throw valuesError;
+    if (setIdsError) throw setIdsError;
     
-    if (!feedValues || feedValues.length === 0) {
-      return { ok: false, message: '해당 기간에 피드 데이터가 없습니다' };
-    }
-    
-    // 5. 실제 데이터가 있는 set_id 추출
-    const usedSetIds = [...new Set(feedValues.map(v => v.set_id).filter(Boolean))];
+    // DISTINCT 처리 + null 필터링
+    const usedSetIds = [...new Set(
+      (usedSetIdsData || [])
+        .map(v => v.set_id)
+        .filter((id): id is string => id !== null)
+    )];
     
     if (usedSetIds.length === 0) {
       return { ok: false, message: '해당 기간에 피드 데이터가 없습니다' };
     }
     
-    // 6. 세트 조회 (피드 데이터에 사용된 세트들)
+    // 5. 세트 조회 (피드 데이터에 사용된 세트들)
     const { data: usedOptionSets, error: setsError } = await supabase
       .from('feed_option_sets')
-      .select('id, name, stats_category, is_scored, is_in_weekly_stats, deleted_at, created_at')
+      .select('id, name, set_key, stats_category, is_scored, is_in_weekly_stats, deleted_at, created_at')
       .eq('tenant_id', profile.tenant_id)
       .in('id', usedSetIds);
     
     if (setsError) throw setsError;
     
-    // 7. 현재 활성 config의 세트 조회 (is_in_weekly_stats 설정 가져오기용)
+    // 6. 현재 활성 config의 세트 조회
     const { data: activeConfig } = await supabase
       .from('feed_configs')
       .select('id')
@@ -382,45 +414,55 @@ export async function generateWeeklyReport(params: {
       .is('deleted_at', null)
       .single();
     
-    let currentConfigSets: { name: string; is_in_weekly_stats: boolean | null }[] = [];
+    let currentConfigSets: { set_key: string | null; name: string; is_in_weekly_stats: boolean | null }[] = [];
     if (activeConfig) {
       const { data: configSets } = await supabase
         .from('feed_option_sets')
-        .select('name, is_in_weekly_stats')
+        .select('set_key, name, is_in_weekly_stats')
+        .eq('tenant_id', profile.tenant_id)
         .eq('config_id', activeConfig.id)
         .is('deleted_at', null);
       currentConfigSets = configSets || [];
     }
     
-    // 현재 설정의 is_in_weekly_stats를 이름 기준으로 매핑
-    const currentSettingsMap = new Map(
+    const currentSettingsByKey = new Map(
+      currentConfigSets.filter(s => s.set_key).map(s => [s.set_key, s.is_in_weekly_stats])
+    );
+    const currentSettingsByName = new Map(
       currentConfigSets.map(s => [s.name, s.is_in_weekly_stats])
     );
     
-    // 현재 설정 기준으로 필터 (이름 매칭)
+    // 현재 설정 기준으로 필터
     const statsEnabledSets = (usedOptionSets || []).filter(s => {
-      // 현재 설정에 같은 이름이 있으면 그 설정 사용
-      if (currentSettingsMap.has(s.name)) {
-        return currentSettingsMap.get(s.name) !== false;
+      if (s.set_key && currentSettingsByKey.has(s.set_key)) {
+        return currentSettingsByKey.get(s.set_key) !== false;
       }
-      // 없으면 원래 세트의 설정 사용
+      if (currentSettingsByName.has(s.name)) {
+        return currentSettingsByName.get(s.name) !== false;
+      }
       return s.is_in_weekly_stats !== false;
     });
-    
-    // optionSets 변수 할당 (기존 코드 호환)
-    const optionSets = statsEnabledSets;
     
     if (statsEnabledSets.length === 0) {
       return { ok: false, message: '통계에 포함된 평가항목이 없습니다. 피드 설정을 확인해주세요.' };
     }
     
-    // 7. 항목 변경 시점 감지
-    // 날짜별로 사용된 set_id 그룹 확인
+    // 7. 피드 값 조회
+    const statsSetIds = statsEnabledSets.map(s => s.id);
+    const { data: feedValues, error: valuesError } = await supabase
+      .from('feed_values')
+      .select('feed_id, set_id, option_id, score')
+      .in('feed_id', feedIds)
+      .in('set_id', statsSetIds);
+    
+    if (valuesError) throw valuesError;
+    
+    // 8. 항목 변경 시점 감지
     const dateSetGroups: { date: string; setIds: Set<string> }[] = [];
     
     for (const feed of feeds) {
       const feedSetIds = new Set(
-        feedValues
+        (feedValues || [])
           .filter(v => v.feed_id === feed.id && v.set_id)
           .map(v => v.set_id as string)
       );
@@ -432,17 +474,11 @@ export async function generateWeeklyReport(params: {
       const lastSetIdsStr = lastGroup ? [...lastGroup.setIds].sort().join(',') : '';
       
       if (currentSetIdsStr !== lastSetIdsStr) {
-        // 새 그룹 시작 (항목 구성이 바뀜)
         dateSetGroups.push({ date: feed.feed_date, setIds: feedSetIds });
       }
     }
     
-    // 항목 변경점 정보 생성
-    const configChanges: { 
-      changeDate: string; 
-      beforeItems: string[]; 
-      afterItems: string[] 
-    }[] = [];
+    const configChanges: { changeDate: string; beforeItems: string[]; afterItems: string[] }[] = [];
     
     if (dateSetGroups.length > 1) {
       const setNameMap = new Map(statsEnabledSets.map(s => [s.id, s.stats_category || s.name]));
@@ -459,7 +495,7 @@ export async function generateWeeklyReport(params: {
       }
     }
     
-    // 7. 옵션 정보 조회 (문장형 라벨용) - 보관된 것도 포함
+    // 9. 옵션 정보 조회
     const setIds = statsEnabledSets.map(s => s.id);
     const { data: options } = await supabase
       .from('feed_options')
@@ -468,26 +504,20 @@ export async function generateWeeklyReport(params: {
     
     const optionMap = new Map(options?.map(o => [o.id, o]) || []);
     
-    // 8. 세트별 통계 계산
+    // 10. 세트별 통계 계산
     const categoryStats: CategoryStat[] = [];
     const scoreStatsForAnalysis: { category: string; avgScore: number }[] = [];
     
     for (const set of statsEnabledSets) {
       const setValues = feedValues?.filter(v => v.set_id === set.id) || [];
       const statsCategory = set.stats_category || set.name;
-      const isArchived = set.deleted_at !== null;  // 보관 여부
+      const isArchived = set.deleted_at !== null;
       
       if (set.is_scored) {
-        // 점수형: 평균 계산 (option에서 score 가져오기)
         const scores = setValues
           .map(v => {
-            // feed_values.score가 있으면 사용, 없으면 option.score 사용
-            if (v.score !== null) return v.score;
-            if (v.option_id) {
-              const opt = optionMap.get(v.option_id);
-              return opt?.score ?? null;
-            }
-            return null;
+            const opt = v.option_id ? optionMap.get(v.option_id) : null;
+            return opt?.score ?? v.score ?? null;
           })
           .filter((s): s is number => s !== null);
         
@@ -506,7 +536,6 @@ export async function generateWeeklyReport(params: {
           scoreStatsForAnalysis.push({ category: statsCategory, avgScore });
         }
       } else {
-        // 문장형: 최다 선택 옵션 계산
         const optionCounts: Record<string, { label: string; count: number }> = {};
         
         for (const v of setValues) {
@@ -541,26 +570,37 @@ export async function generateWeeklyReport(params: {
       }
     }
     
-    // 8. 전체 평균 계산 (점수형만)
+    // 11. 전체 평균 계산
     const allScores = scoreStatsForAnalysis.map(s => s.avgScore);
     const overallAvgScore = allScores.length > 0
       ? Math.round(allScores.reduce((a, b) => a + b, 0) / allScores.length)
       : null;
     
-    // 9. 강점/보완 분석
-    const analysis = analyzeStrengthsWeaknesses(
-      scoreStatsForAnalysis,
-      settings.strength_threshold,
-      settings.weakness_threshold,
-      settings.messageTone
-    );
+    // 12. 강점/보완 분석
+    const strengths: string[] = [];
+    const weaknesses: string[] = [];
     
-    // 10. 결과 반환
+    for (const stat of scoreStatsForAnalysis) {
+      if (stat.avgScore >= settings.strength_threshold) {
+        strengths.push(stat.category);
+      } else if (stat.avgScore < settings.weakness_threshold) {
+        weaknesses.push(stat.category);
+      }
+    }
+    
+    const analysis: StrengthWeaknessAnalysis = {
+      strengths,
+      weaknesses,
+      strengthThreshold: settings.strength_threshold,
+      weaknessThreshold: settings.weakness_threshold,
+    };
+    
+    // 13. 결과 반환
     const reportData: WeeklyReportData = {
       student: {
         id: student.id,
         name: student.name,
-        displayCode: student.display_code || '',
+        displayCode: student.display_code,
       },
       period: {
         startDate,
@@ -569,7 +609,8 @@ export async function generateWeeklyReport(params: {
       categoryStats,
       overallAvgScore,
       analysis,
-      generatedAt: new Date().toISOString(),
+      feedCount: feeds.length,
+      messageTone: settings.messageTone,
       configChanges: configChanges.length > 0 ? configChanges : undefined,
     };
     
@@ -581,89 +622,377 @@ export async function generateWeeklyReport(params: {
 }
 
 // ============================================================================
-// 강점/보완 분석 헬퍼
-// ============================================================================
-
-function analyzeStrengthsWeaknesses(
-  stats: { category: string; avgScore: number }[],
-  strengthThreshold: number,
-  weaknessThreshold: number,
-  tone: MessageTone
-): StrengthWeaknessAnalysis {
-  const strengths = stats
-    .filter(s => s.avgScore > strengthThreshold)
-    .map(s => s.category);
-  
-  const weaknesses = stats
-    .filter(s => s.avgScore < weaknessThreshold)
-    .map(s => s.category);
-  
-  let nextGoal: string;
-  
-  if (weaknesses.length === 0) {
-    // 보완점 없으면 랜덤 칭찬
-    const praiseList = PRAISE_TEMPLATES[tone];
-    const randomIndex = Math.floor(Math.random() * praiseList.length);
-    nextGoal = praiseList[randomIndex];
-  } else {
-    // 보완점 있으면 집중 학습 목표
-    const goalPrefix = tone === 'formal' ? '집중 학습 필요: ' 
-                     : tone === 'friendly' ? '다음엔 이것만 신경 쓰면 돼요: '
-                     : '';
-    nextGoal = goalPrefix + weaknesses.join(', ') + (tone === 'formal' ? '' : ' 집중 학습');
-  }
-  
-  return {
-    strengths,
-    weaknesses,
-    nextGoal,
-  };
-}
-
-// ============================================================================
 // 반 전체 리포트 일괄 생성
 // ============================================================================
 
 export async function generateBulkWeeklyReports(params: {
-  classId: string;
+  studentIds: string[];
   startDate: string;
   endDate: string;
-}): Promise<ActionResult<WeeklyReportData[]>> {
+}): Promise<ActionResult<{ reports: WeeklyReportData[]; errorCount: number; hasConfigChanges: boolean }>> {
   try {
-    // 반 학생 목록 조회
-    const studentsResult = await getStudentsForReport(params.classId);
-    if (!studentsResult.ok) {
-      return { ok: false, message: studentsResult.message };
+    const ctx = await getAuthContext();
+    if ('error' in ctx) {
+      return { ok: false, message: ctx.error || '인증 오류가 발생했습니다' };
+    }
+    const { supabase, user, profile } = ctx;
+    
+    const { studentIds, startDate, endDate } = params;
+    
+    if (studentIds.length === 0) {
+      return { ok: false, message: '학생을 선택해주세요' };
     }
     
-    const students = studentsResult.data;
-    if (students.length === 0) {
-      return { ok: false, message: '해당 반에 학생이 없습니다' };
+    // ========== 공통 데이터 한 번만 조회 ==========
+    
+    // 1. 리포트 설정 조회 (공통)
+    const settingsResult = await getReportSettings();
+    const settings = settingsResult.ok ? settingsResult.data : {
+      strength_threshold: DEFAULT_STRENGTH_THRESHOLD,
+      weakness_threshold: DEFAULT_WEAKNESS_THRESHOLD,
+      messageTone: 'friendly' as MessageTone,
+    };
+    
+    // 2. 현재 활성 config 조회 (공통)
+    const { data: activeConfig } = await supabase
+      .from('feed_configs')
+      .select('id')
+      .eq('tenant_id', profile.tenant_id)
+      .eq('is_active', true)
+      .is('deleted_at', null)
+      .single();
+    
+    let currentConfigSets: { set_key: string | null; name: string; is_in_weekly_stats: boolean | null }[] = [];
+    if (activeConfig) {
+      const { data: configSets } = await supabase
+        .from('feed_option_sets')
+        .select('set_key, name, is_in_weekly_stats')
+        .eq('tenant_id', profile.tenant_id)
+        .eq('config_id', activeConfig.id)
+        .is('deleted_at', null);
+      currentConfigSets = configSets || [];
     }
     
-    // 각 학생별 리포트 생성
-    const reports: WeeklyReportData[] = [];
-    const errors: string[] = [];
+    const currentSettingsByKey = new Map(
+      currentConfigSets.filter(s => s.set_key).map(s => [s.set_key, s.is_in_weekly_stats])
+    );
+    const currentSettingsByName = new Map(
+      currentConfigSets.map(s => [s.name, s.is_in_weekly_stats])
+    );
     
-    for (const student of students) {
-      const result = await generateWeeklyReport({
-        studentId: student.id,
-        startDate: params.startDate,
-        endDate: params.endDate,
-      });
+    // 3. teacher 권한 체크 (공통 - 한 번만)
+    let allowedClassIds: string[] | null = null;
+    
+    if (profile.role === 'teacher') {
+      const { data: teacherPerm } = await supabase
+        .from('teacher_permissions')
+        .select('can_view_reports')
+        .eq('tenant_id', profile.tenant_id)
+        .eq('teacher_id', user.id)
+        .is('deleted_at', null)
+        .maybeSingle();
       
-      if (result.ok) {
-        reports.push(result.data);
-      } else {
-        errors.push(`${student.name}: ${result.message}`);
+      if (teacherPerm && teacherPerm.can_view_reports === false) {
+        return { ok: false, message: '리포트 조회 권한이 없습니다' };
+      }
+      
+      const { data: assignments } = await supabase
+        .from('class_teachers')
+        .select('class_id')
+        .eq('tenant_id', profile.tenant_id)
+        .eq('teacher_id', user.id)
+        .eq('is_active', true)
+        .is('deleted_at', null);
+      
+      allowedClassIds = (assignments || []).map(a => a.class_id).filter(Boolean) as string[];
+      
+      if (allowedClassIds.length === 0) {
+        return { ok: false, message: '담당 반이 없습니다' };
       }
     }
     
-    if (reports.length === 0) {
-      return { ok: false, message: '생성된 리포트가 없습니다. ' + errors.join(', ') };
+    // 4. 학생 정보 일괄 조회
+    const { data: students, error: studentsError } = await supabase
+      .from('students')
+      .select('id, name, display_code')
+      .eq('tenant_id', profile.tenant_id)
+      .in('id', studentIds);
+    
+    if (studentsError) throw studentsError;
+    
+    const studentMap = new Map((students || []).map(s => [s.id, s]));
+    
+    // 5. teacher인 경우 담당 학생 필터링
+    let validStudentIds = studentIds;
+    if (allowedClassIds) {
+      const { data: allowedMembers } = await supabase
+        .from('class_members')
+        .select('student_id')
+        .eq('tenant_id', profile.tenant_id)
+        .in('class_id', allowedClassIds)
+        .eq('is_active', true)
+        .is('deleted_at', null);
+      
+      const allowedStudentIds = new Set((allowedMembers || []).map(m => m.student_id));
+      validStudentIds = studentIds.filter(id => allowedStudentIds.has(id));
     }
     
-    return { ok: true, data: reports };
+    // 6. 옵션 정보 일괄 조회 (공통)
+    const { data: allOptions } = await supabase
+      .from('feed_options')
+      .select('id, set_id, label, score')
+      .eq('tenant_id', profile.tenant_id);
+    
+    const optionMap = new Map((allOptions || []).map(o => [o.id, o]));
+    
+    // ========== 학생별 리포트 생성 (병렬 처리) ==========
+    
+    const reports: WeeklyReportData[] = [];
+    let errorCount = 0;
+    let hasConfigChanges = false;
+    
+    // 5개씩 배치 처리
+    const batchSize = 5;
+    for (let i = 0; i < validStudentIds.length; i += batchSize) {
+      const batch = validStudentIds.slice(i, i + batchSize);
+      
+      const batchResults = await Promise.all(
+        batch.map(async (studentId) => {
+          try {
+            const student = studentMap.get(studentId);
+            if (!student) {
+              return { ok: false as const, message: '학생을 찾을 수 없습니다' };
+            }
+            
+            // 피드 조회
+            const { data: feeds, error: feedsError } = await supabase
+              .from('student_feeds')
+              .select('id, feed_date')
+              .eq('tenant_id', profile.tenant_id)
+              .eq('student_id', studentId)
+              .gte('feed_date', startDate)
+              .lte('feed_date', endDate)
+              .eq('is_makeup', false)
+              .order('feed_date', { ascending: true });
+            
+            if (feedsError) throw feedsError;
+            
+            if (!feeds || feeds.length === 0) {
+              return { ok: false as const, message: '해당 기간에 피드 데이터가 없습니다' };
+            }
+            
+            const feedIds = feeds.map(f => f.id);
+            
+            // 사용된 set_id 조회
+            const { data: usedSetIdsData } = await supabase
+              .from('feed_values')
+              .select('set_id')
+              .in('feed_id', feedIds)
+              .not('set_id', 'is', null);
+            
+            const usedSetIds = [...new Set(
+              (usedSetIdsData || [])
+                .map(v => v.set_id)
+                .filter((id): id is string => id !== null)
+            )];
+            
+            if (usedSetIds.length === 0) {
+              return { ok: false as const, message: '해당 기간에 피드 데이터가 없습니다' };
+            }
+            
+            // 세트 조회
+            const { data: usedOptionSets } = await supabase
+              .from('feed_option_sets')
+              .select('id, name, set_key, stats_category, is_scored, is_in_weekly_stats, deleted_at, created_at')
+              .eq('tenant_id', profile.tenant_id)
+              .in('id', usedSetIds);
+            
+            // 통계 활성 세트 필터링
+            const statsEnabledSets = (usedOptionSets || []).filter(s => {
+              if (s.set_key && currentSettingsByKey.has(s.set_key)) {
+                return currentSettingsByKey.get(s.set_key) !== false;
+              }
+              if (currentSettingsByName.has(s.name)) {
+                return currentSettingsByName.get(s.name) !== false;
+              }
+              return s.is_in_weekly_stats !== false;
+            });
+            
+            if (statsEnabledSets.length === 0) {
+              return { ok: false as const, message: '통계에 포함된 평가항목이 없습니다' };
+            }
+            
+            // 피드 값 조회
+            const statsSetIds = statsEnabledSets.map(s => s.id);
+            const { data: feedValues } = await supabase
+              .from('feed_values')
+              .select('feed_id, set_id, option_id, score')
+              .in('feed_id', feedIds)
+              .in('set_id', statsSetIds);
+            
+            // 항목 변경 시점 감지
+            const dateSetGroups: { date: string; setIds: Set<string> }[] = [];
+            for (const feed of feeds) {
+              const feedSetIds = new Set(
+                (feedValues || [])
+                  .filter(v => v.feed_id === feed.id && v.set_id)
+                  .map(v => v.set_id as string)
+              );
+              if (feedSetIds.size === 0) continue;
+              
+              const lastGroup = dateSetGroups[dateSetGroups.length - 1];
+              const currentSetIdsStr = [...feedSetIds].sort().join(',');
+              const lastSetIdsStr = lastGroup ? [...lastGroup.setIds].sort().join(',') : '';
+              
+              if (currentSetIdsStr !== lastSetIdsStr) {
+                dateSetGroups.push({ date: feed.feed_date, setIds: feedSetIds });
+              }
+            }
+            
+            const configChanges: { changeDate: string; beforeItems: string[]; afterItems: string[] }[] = [];
+            if (dateSetGroups.length > 1) {
+              const setNameMap = new Map(statsEnabledSets.map(s => [s.id, s.stats_category || s.name]));
+              for (let j = 1; j < dateSetGroups.length; j++) {
+                configChanges.push({
+                  changeDate: dateSetGroups[j].date,
+                  beforeItems: [...dateSetGroups[j - 1].setIds].map(id => setNameMap.get(id) || '알 수 없음'),
+                  afterItems: [...dateSetGroups[j].setIds].map(id => setNameMap.get(id) || '알 수 없음'),
+                });
+              }
+            }
+            
+            // 세트별 통계 계산
+            const categoryStats: (ScoreCategoryStat | TextCategoryStat)[] = [];
+            const scoreStatsForAnalysis: { category: string; avgScore: number }[] = [];
+            
+            for (const set of statsEnabledSets) {
+              const setValues = feedValues?.filter(v => v.set_id === set.id) || [];
+              const statsCategory = set.stats_category || set.name;
+              const isArchived = set.deleted_at !== null;
+              
+              if (set.is_scored) {
+                const scores = setValues
+                  .map(v => {
+                    const opt = v.option_id ? optionMap.get(v.option_id) : null;
+                    return opt?.score ?? v.score ?? null;
+                  })
+                  .filter((s): s is number => s !== null);
+                
+                if (scores.length > 0) {
+                  const avgScore = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+                  categoryStats.push({
+                    statsCategory,
+                    setName: set.name,
+                    avgScore,
+                    sampleCount: scores.length,
+                    isScored: true,
+                    isArchived,
+                  } as ScoreCategoryStat);
+                  scoreStatsForAnalysis.push({ category: statsCategory, avgScore });
+                }
+              } else {
+                const optionCounts: Record<string, { label: string; count: number }> = {};
+                for (const v of setValues) {
+                  if (v.option_id) {
+                    const opt = optionMap.get(v.option_id);
+                    if (opt?.label) {
+                      if (!optionCounts[v.option_id]) {
+                        optionCounts[v.option_id] = { label: opt.label, count: 0 };
+                      }
+                      optionCounts[v.option_id].count++;
+                    }
+                  }
+                }
+                
+                const entries = Object.values(optionCounts);
+                if (entries.length > 0) {
+                  const sorted = entries.sort((a, b) => b.count - a.count);
+                  const top = sorted[0];
+                  const totalCount = entries.reduce((sum, e) => sum + e.count, 0);
+                  
+                  categoryStats.push({
+                    statsCategory,
+                    setName: set.name,
+                    topOption: top.label,
+                    topCount: top.count,
+                    totalCount,
+                    isScored: false,
+                    isArchived,
+                  } as TextCategoryStat);
+                }
+              }
+            }
+            
+            // 강점/약점 분석
+            const strengths: string[] = [];
+            const weaknesses: string[] = [];
+            
+            for (const stat of scoreStatsForAnalysis) {
+              if (stat.avgScore >= settings.strength_threshold) {
+                strengths.push(stat.category);
+              } else if (stat.avgScore < settings.weakness_threshold) {
+                weaknesses.push(stat.category);
+              }
+            }
+            
+            const analysis: StrengthWeaknessAnalysis = {
+              strengths,
+              weaknesses,
+              strengthThreshold: settings.strength_threshold,
+              weaknessThreshold: settings.weakness_threshold,
+            };
+            
+            // 전체 평균 계산
+            const allScores = scoreStatsForAnalysis.map(s => s.avgScore);
+            const overallAvgScore = allScores.length > 0
+              ? Math.round(allScores.reduce((a, b) => a + b, 0) / allScores.length)
+              : null;
+            
+            return {
+              ok: true as const,
+              data: {
+                student: {
+                  id: student.id,
+                  name: student.name,
+                  displayCode: student.display_code,
+                },
+                period: { startDate, endDate },
+                categoryStats,
+                overallAvgScore,
+                analysis,
+                feedCount: feeds.length,
+                messageTone: settings.messageTone,
+                configChanges,
+              },
+            };
+          } catch (error) {
+            console.error(`리포트 생성 실패 (${studentId}):`, error);
+            return { ok: false as const, message: '리포트 생성에 실패했습니다' };
+          }
+        })
+      );
+      
+      // 결과 처리
+      for (const result of batchResults) {
+        if (result.ok) {
+          reports.push(result.data);
+          if (result.data.configChanges && result.data.configChanges.length > 0) {
+            hasConfigChanges = true;
+          }
+        } else {
+          errorCount++;
+        }
+      }
+    }
+    
+    return { 
+      ok: true, 
+      data: { 
+        reports, 
+        errorCount, 
+        hasConfigChanges 
+      } 
+    };
   } catch (error) {
     console.error('generateBulkWeeklyReports error:', error);
     return { ok: false, message: '일괄 리포트 생성에 실패했습니다' };
