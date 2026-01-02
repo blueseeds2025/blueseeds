@@ -20,6 +20,7 @@ export interface ReportSettings {
   tenant_id: string;
   strength_threshold: number;   // 강점 기준 (기본 80)
   weakness_threshold: number;   // 보완 기준 (기본 75)
+  weekly_template_type: number; 
   created_at: string | null;    // ✅ nullable로 변경
   updated_at: string | null;    // ✅ nullable로 변경
   deleted_at: string | null;

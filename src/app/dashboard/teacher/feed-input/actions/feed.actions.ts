@@ -3,6 +3,7 @@ export {
   getTeacherClasses,
   getClassStudents,
   getFeedOptionSets,
+  getExamTypes,  // 🆕 추가
   getSavedFeeds,
   getTenantSettings,
   getPreviousProgress,

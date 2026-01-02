@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import {
   ClassStudent,
   FeedOptionSet,
+  ExamType,
   StudentCardData,
   SavedFeedData,
   TenantSettings,
@@ -26,6 +27,7 @@ interface UseFeedRegularProps {
   classId: string;
   date: string;
   optionSets: FeedOptionSet[];
+  examTypes: ExamType[];  // 🆕 추가
   tenantSettings: TenantSettings;
   makeupTicketMap: Record<string, string>;
   setMakeupTicketMap: React.Dispatch<React.SetStateAction<Record<string, string>>>;
@@ -35,6 +37,7 @@ export function useFeedRegular({
   classId,
   date,
   optionSets,
+  examTypes,  // 🆕 추가
   tenantSettings,
   makeupTicketMap,
   setMakeupTicketMap,
@@ -64,6 +67,13 @@ export function useFeedRegular({
       feedValues[set.id] = savedValue?.optionId || null;
     });
     
+    // 🆕 시험 점수 초기화
+    const examScores: Record<string, number | null> = {};
+    examTypes.forEach(exam => {
+      const savedScore = saved?.examScores?.find(e => e.setId === exam.id);
+      examScores[exam.id] = savedScore?.score ?? null;
+    });
+    
     const memoValues: Record<string, string> = saved?.memoValues || { 'default': '' };
     const hasSaved = !!saved;
     const status: CardStatus = hasSaved ? 'saved' : 'empty';
@@ -79,6 +89,7 @@ export function useFeedRegular({
       progressText: saved?.progressText,
       previousProgress,
       feedValues,
+      examScores,  // 🆕 추가
       memoValues,
       materials: [],
       status,
@@ -96,9 +107,12 @@ export function useFeedRegular({
       return 'dirty';
     }
     
-    for (const set of optionSets) {
-      if (!data.feedValues[set.id]) {
-        return 'error';
+    // 분업형(team)이 아니면 필수 체크 (담임형은 전부 필수)
+    if (tenantSettings.operation_mode !== 'team') {
+      for (const set of optionSets) {
+        if (!data.feedValues[set.id]) {
+          return 'error';
+        }
       }
     }
     
@@ -149,7 +163,7 @@ export function useFeedRegular({
     }
     
     loadStudentsAndFeeds();
-  }, [classId, date, optionSets, tenantSettings.progress_enabled]);
+  }, [classId, date, optionSets, examTypes, tenantSettings.progress_enabled]);
 
   // 페이지 이탈 방지
   useEffect(() => {
@@ -254,6 +268,27 @@ export function useFeedRegular({
     });
   }, [optionSets]);
 
+  // 🆕 시험 점수 변경
+  const handleExamScoreChange = useCallback((
+    studentId: string,
+    setId: string,
+    score: number | null
+  ) => {
+    setCardDataMap(prev => {
+      const current = prev[studentId];
+      if (!current) return prev;
+      
+      const updated = {
+        ...current,
+        examScores: { ...current.examScores, [setId]: score },
+        isDirty: true,
+      };
+      updated.status = calculateCardStatus(updated);
+      
+      return { ...prev, [studentId]: updated };
+    });
+  }, [optionSets]);
+
   // 단일 저장
   const handleSave = useCallback(async (studentId: string) => {
     const cardData = cardDataMap[studentId];
@@ -270,6 +305,11 @@ export function useFeedRegular({
     const isMakeupSession = !!ticketId;
     
     try {
+      // 🆕 시험 점수 추출 (null이 아닌 것만)
+      const examScores = Object.entries(cardData.examScores)
+        .filter(([_, score]) => score !== null && score !== undefined)
+        .map(([setId, score]) => ({ setId, score: score! }));
+      
       const payload: SaveFeedPayload = {
         studentId,
         classId,
@@ -289,6 +329,7 @@ export function useFeedRegular({
               .filter(([_, optionId]) => optionId)
               .map(([setId, optionId]) => ({ setId, optionId: optionId! }))
           : [],
+        examScores: cardData.attendanceStatus !== 'absent' ? examScores : [],  // 🆕 추가
         idempotencyKey: generateIdempotencyKey(),
       };
       
@@ -315,6 +356,7 @@ export function useFeedRegular({
               feedValues: Object.entries(cardData.feedValues)
                 .filter(([_, optionId]) => optionId)
                 .map(([setId, optionId]) => ({ setId, optionId: optionId! })),
+              examScores,  // 🆕 추가
             },
           },
         }));
@@ -355,6 +397,11 @@ export function useFeedRegular({
         const ticketId = makeupTicketMap[cardData.studentId];
         const isMakeupSession = !!ticketId;
         
+        // 🆕 시험 점수 추출
+        const examScores = Object.entries(cardData.examScores)
+          .filter(([_, score]) => score !== null && score !== undefined)
+          .map(([setId, score]) => ({ setId, score: score! }));
+        
         return {
           studentId: cardData.studentId,
           classId,
@@ -374,6 +421,7 @@ export function useFeedRegular({
                 .filter(([_, optionId]) => optionId)
                 .map(([setId, optionId]) => ({ setId, optionId: optionId! }))
             : [],
+          examScores: cardData.attendanceStatus !== 'absent' ? examScores : [],  // 🆕 추가
           idempotencyKey: generateIdempotencyKey(),
         };
       });
@@ -430,6 +478,7 @@ export function useFeedRegular({
     handleProgressChange,
     handleMemoChange,
     handleFeedValueChange,
+    handleExamScoreChange,  // 🆕 추가
     handleSave,
     handleSaveAll,
     

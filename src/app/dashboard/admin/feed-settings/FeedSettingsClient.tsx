@@ -28,8 +28,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 // Page Components
-import BasicSettingsSection from './components/BasicSettingsSection';
-import MakeupSettingsSection from './components/MakeupSettingsSection';
 import OptionSetCard from './components/OptionSetCard';
 import PresetListModal from './components/PresetListModal';
 import PresetSaveModal from './components/PresetSaveModal';
@@ -47,11 +45,7 @@ import { useConfirmDialog } from './hooks/useConfirmDialog';
 
 // Server Actions
 import {
-  getTenantSettings,
-  updateBasicSettings,
-  updateMakeupSettings,
   updateOptionSetWeeklyStats,
-  type BasicSettings,
 } from './actions/feed-settings.actions';
 
 // ============================================================================
@@ -177,25 +171,6 @@ export default function FeedSettingsClient() {
   // ========== Confirm Dialog ==========
   const { confirm, ConfirmDialog } = useConfirmDialog();
 
-  // ========== Feature Flags ==========
-  const [hasMakeupSystem, setHasMakeupSystem] = useState(false);
-
-  // ========== Tenant Settings ==========
-  const [basicSettings, setBasicSettings] = useState<BasicSettings>({
-    progress_enabled: false,
-    materials_enabled: false,
-    exam_score_enabled: false,
-  });
-  const [makeupDefaults, setMakeupDefaults] = useState<Record<string, boolean>>({
-    '병결': true,
-    '학교행사': true,
-    '가사': false,
-    '무단': false,
-    '기타': true,
-  });
-  const [settingsLoading, setSettingsLoading] = useState(true);
-  const [settingsSaving, setSettingsSaving] = useState(false);
-
   // ========== Tenant ID ==========
   const [cachedTenantId, setCachedTenantId] = useState<string | null>(null);
 
@@ -255,73 +230,6 @@ export default function FeedSettingsClient() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
-
-  useEffect(() => {
-    const loadFeatures = async () => {
-      const tenantId = await getTenantId();
-      if (!tenantId) return;
-      
-      const { data: features } = await supabase
-        .from('tenant_features')
-        .select('feature_key')
-        .eq('tenant_id', tenantId)
-        .eq('is_enabled', true);
-      
-      const featureKeys = features?.map(f => f.feature_key) || [];
-      setHasMakeupSystem(featureKeys.includes('makeup_system'));
-    };
-    
-    loadFeatures();
-  }, [supabase, getTenantId]);
-
-  // Tenant Settings 로드
-  useEffect(() => {
-    const loadSettings = async () => {
-      setSettingsLoading(true);
-      const result = await getTenantSettings();
-      if (result.ok && result.data) {
-        setBasicSettings(result.data.basic);
-        setMakeupDefaults(result.data.makeup.makeup_defaults);
-      }
-      setSettingsLoading(false);
-    };
-    
-    loadSettings();
-  }, []);
-
-  // Basic Settings 업데이트 핸들러
-  const handleUpdateBasicSetting = useCallback(async (key: keyof BasicSettings, value: boolean) => {
-    const newSettings = { ...basicSettings, [key]: value };
-    setBasicSettings(newSettings); // Optimistic update
-    setSettingsSaving(true);
-    
-    const result = await updateBasicSettings(newSettings);
-    if (result.ok) {
-      toast.success('설정이 저장되었습니다', { duration: 2000 });
-    } else {
-      setBasicSettings(basicSettings); // Rollback
-      toast.error('설정 저장에 실패했습니다');
-    }
-    setSettingsSaving(false);
-  }, [basicSettings]);
-
-  // Makeup Settings 업데이트 핸들러
-  const handleUpdateMakeupDefault = useCallback(async (reasonKey: string, checked: boolean) => {
-    if (!hasMakeupSystem) return;
-    
-    const newDefaults = { ...makeupDefaults, [reasonKey]: checked };
-    setMakeupDefaults(newDefaults); // Optimistic update
-    setSettingsSaving(true);
-    
-    const result = await updateMakeupSettings(newDefaults);
-    if (result.ok) {
-      toast.success('보강 설정이 저장되었습니다', { duration: 2000 });
-    } else {
-      setMakeupDefaults(makeupDefaults); // Rollback
-      toast.error('설정 저장에 실패했습니다');
-    }
-    setSettingsSaving(false);
-  }, [makeupDefaults, hasMakeupSystem]);
 
   // ========== Handlers ==========
   const handleUpdateSetName = useCallback(async (setId: string) => {
@@ -383,7 +291,7 @@ export default function FeedSettingsClient() {
       return;
     }
     if (!ui.newItemCategory) {
-      toast.error('AI 리포트 영역을 먼저 선택해주세요');
+     toast.error('카테고리를 먼저 선택해주세요');
       return;
     }
     if (!currentTemplate) {
@@ -414,7 +322,7 @@ export default function FeedSettingsClient() {
       return;
     }
     if (!category) {
-      toast.error('AI 리포트 영역을 먼저 선택해주세요');
+      toast.error('카테고리를 먼저 선택해주세요');
       ui.closeTemplateModal();
       return;
     }
@@ -520,7 +428,7 @@ export default function FeedSettingsClient() {
               <p className="text-sm text-[#9B9A97] mt-1">학생 피드에 기록할 평가항목을 설정하세요</p>
             </div>
             <div className="flex items-center gap-2 text-sm text-gray-600">
-              <span>AI 매핑</span>
+              <span>카테고리</span>
               <Switch
                 checked={ui.isEditMode}
                 onCheckedChange={(v) => ui.setIsEditMode(Boolean(v))}
@@ -531,7 +439,7 @@ export default function FeedSettingsClient() {
           {ui.isEditMode && (
             <div className="mt-3 flex items-center gap-2 text-sm text-[#9B9A97]">
               <Info className={feedStyles.icon.small} />
-              각 평가항목의 AI 리포트 영역(학습/태도/출결/없음)을 변경할 수 있습니다.
+            각 평가항목의 카테고리(태도/과제/평가/진도/리포트 제외)를 변경할 수 있습니다.
             </div>
           )}
         </CardHeader>
@@ -577,7 +485,7 @@ export default function FeedSettingsClient() {
               expanded={ui.expandedSets.has(set.id)}
               isEditMode={ui.isEditMode}
               isHighlightAdd={ui.newlyCreatedSetId === set.id}
-              categoryValue={(categoryDraft[set.id] ?? set.default_report_category ?? 'study') as ReportCategory}
+             categoryValue={(categoryDraft[set.id] ?? set.default_report_category ?? 'EVALUATION') as ReportCategory}
               optionList={options[set.id] ?? []}
               onToggleExpand={() => ui.toggleExpand(set.id)}
               onToggleSetActive={() => void toggleSetActive(set)}
@@ -615,26 +523,6 @@ export default function FeedSettingsClient() {
           ))}
         </CardContent>
       </Card>
-
-      {/* 기본 항목 설정 */}
-      <BasicSettingsSection
-        settings={basicSettings}
-        isLoading={settingsLoading}
-        isSaving={settingsSaving}
-        onUpdateSetting={handleUpdateBasicSetting}
-      />
-
-      {/* 결석/보강 설정 */}
-      <MakeupSettingsSection
-        makeupDefaults={makeupDefaults}
-        isLoading={settingsLoading}
-        isSaving={settingsSaving}
-        hasMakeupSystem={hasMakeupSystem}
-        onToggle={handleUpdateMakeupDefault}
-        onUpgradeClick={() => {
-          toast.info('프리미엄 요금제로 업그레이드하시면 결석/보강 관리 기능을 사용하실 수 있습니다.');
-        }}
-      />
 
       {/* Modals */}
       <TemplateSelectModal

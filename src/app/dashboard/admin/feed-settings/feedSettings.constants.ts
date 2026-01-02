@@ -13,18 +13,30 @@ export const SCORE_STEP = {
 } as const;
 
 // ============================================================================
-// Labels
+// 카테고리 (월간 리포트 섹션 매핑용)
 // ============================================================================
 
-// AI 리포트 카테고리 (고정 목록)
-export const REPORT_CATEGORIES = ['study', 'attitude', 'attendance', 'none'] as const;
+export const REPORT_CATEGORIES = ['ATTITUDE', 'HOMEWORK', 'EVALUATION', 'PROGRESS', 'EXCLUDED'] as const;
 
-export const REPORT_CATEGORY_LABEL: Record<ReportCategory, string> = {
-  study: '학습',
-  attitude: '태도',
-  attendance: '출결',
-  none: '없음',
+export const REPORT_CATEGORY_LABEL: Partial<Record<ReportCategory, string>> = {
+  ATTITUDE: '태도',
+  HOMEWORK: '과제',
+  EVALUATION: '평가',
+  PROGRESS: '진도',
+  EXCLUDED: '리포트 제외',
 };
+
+export const REPORT_CATEGORY_DESCRIPTION: Partial<Record<ReportCategory, string>> = {
+  ATTITUDE: '학습 태도, 집중도, 참여도, 자세',
+  HOMEWORK: '숙제, 과제, 연습량',
+  EVALUATION: '이해도, 실력, 오답률, 선생님 평가',
+  PROGRESS: '학습 진행, 단계, 커리큘럼',
+  EXCLUDED: '내부 관리용 (리포트에 미포함)',
+};
+
+// ============================================================================
+// Labels
+// ============================================================================
 
 export const TEMPLATE_TYPE_LABEL: Record<Exclude<TemplateType, null>, string> = {
   text: '문장형',
@@ -39,7 +51,7 @@ export const TEMPLATE_TYPE_LABEL: Record<Exclude<TemplateType, null>, string> = 
 export const TOAST_MESSAGES = {
   // 성공
   TEMPLATE_APPLIED: '템플릿이 적용되었습니다',
-  CATEGORY_CHANGED: 'AI 리포트 영역이 변경되었습니다',
+  CATEGORY_CHANGED: '카테고리가 변경되었습니다',
   ITEM_ADDED: (name: string) => `'${name}' 평가항목이 추가되었습니다`,
   ITEM_DELETED: (name: string) => `"${name}" 평가항목이 삭제되었습니다`,
   ITEM_DUPLICATED: (name: string) => `"${name}" 평가항목이 복제되었습니다`,
@@ -55,12 +67,12 @@ export const TOAST_MESSAGES = {
   ERR_NO_CONFIG: '설정을 찾을 수 없습니다',
   ERR_NO_NAME: '이름을 입력하세요',
   ERR_NO_ITEM_NAME: '평가항목명을 입력하세요.',
-  ERR_NO_CATEGORY: 'AI 리포트 영역을 먼저 선택해주세요',
+  ERR_NO_CATEGORY: '카테고리를 먼저 선택해주세요',
   ERR_DUPLICATE_NAME: '추가 실패: 이름 중복이 계속 발생했습니다',
 } as const;
 
 // ============================================================================
-// Templates
+// Templates (카테고리 새 값으로 업데이트)
 // ============================================================================
 
 export const FEED_TEMPLATES: Record<FeedTemplateKey, FeedTemplate> = {
@@ -78,7 +90,7 @@ export const FEED_TEMPLATES: Record<FeedTemplateKey, FeedTemplate> = {
         set_key: 'homework',
         is_scored: true,
         score_step: SCORE_STEP.GENERAL,
-        report_category: 'study',
+        report_category: 'HOMEWORK',
         options: [
           { label: '완료', score: 100 },
           { label: '보통', score: 80 },
@@ -91,7 +103,7 @@ export const FEED_TEMPLATES: Record<FeedTemplateKey, FeedTemplate> = {
         set_key: 'attitude',
         is_scored: true,
         score_step: SCORE_STEP.GENERAL,
-        report_category: 'attitude',
+        report_category: 'ATTITUDE',
         options: [
           { label: '적극적', score: 100 },
           { label: '보통', score: 70 },
@@ -110,7 +122,7 @@ export const FEED_TEMPLATES: Record<FeedTemplateKey, FeedTemplate> = {
         set_key: 'vocabulary',
         is_scored: true,
         score_step: SCORE_STEP.PRECISE,
-        report_category: 'study',
+        report_category: 'EVALUATION',
         options: [
           { label: 'Pass', score: 100 },
           { label: '-1~2개', score: 90 },
@@ -118,15 +130,15 @@ export const FEED_TEMPLATES: Record<FeedTemplateKey, FeedTemplate> = {
         ],
       },
       {
-        name: '발음',
-        set_key: 'pronunciation',
+        name: '이해도',
+        set_key: 'comprehension',
         is_scored: true,
         score_step: SCORE_STEP.PRECISE,
-        report_category: 'study',
+        report_category: 'EVALUATION',
         options: [
-          { label: '원어민 수준', score: 100 },
-          { label: '우수', score: 85 },
-          { label: '개선필요', score: 70 },
+          { label: '완벽히 이해', score: 100 },
+          { label: '대체로 이해', score: 85 },
+          { label: '복습 필요', score: 70 },
         ],
       },
     ],
@@ -137,15 +149,15 @@ export const FEED_TEMPLATES: Record<FeedTemplateKey, FeedTemplate> = {
     description: '점수 없음',
     data: [
       {
-        name: '출석',
-        set_key: 'attendance',
+        name: '진도',
+        set_key: 'progress',
         is_scored: false,
         score_step: null,
-        report_category: 'attendance',
+        report_category: 'PROGRESS',
         options: [
-          { label: '등원', score: null },
-          { label: '지각', score: null },
-          { label: '결석', score: null },
+          { label: '예정대로 진행', score: null },
+          { label: '빠른 진행', score: null },
+          { label: '복습 중', score: null },
         ],
       },
       {
@@ -153,7 +165,7 @@ export const FEED_TEMPLATES: Record<FeedTemplateKey, FeedTemplate> = {
         set_key: 'notes',
         is_scored: false,
         score_step: null,
-        report_category: 'none',
+        report_category: 'EXCLUDED',
         options: [
           { label: '컨디션 좋음', score: null },
           { label: '피곤함', score: null },

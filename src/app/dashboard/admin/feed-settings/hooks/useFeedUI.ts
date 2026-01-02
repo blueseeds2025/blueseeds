@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { setExpandedSetsCallback } from '../stores/useFeedSettingsStore';
+import type { ReportCategory } from '@/types/feed-settings';
 
 /**
  * 피드 설정 페이지의 UI 전용 상태 관리 훅
@@ -69,8 +70,7 @@ export function useFeedUI() {
   // ========== Add Item Form ==========
   const [isAddingItem, setIsAddingItem] = useState(false);
   const [newItemName, setNewItemName] = useState('');
-  const [newItemCategory, setNewItemCategory] = useState<'study' | 'attitude' | 'attendance' | 'none' | null>(null);
-
+ const [newItemCategory, setNewItemCategory] = useState<ReportCategory | null>(null);
   const openAddItemForm = useCallback(() => {
     setIsAddingItem(true);
   }, []);

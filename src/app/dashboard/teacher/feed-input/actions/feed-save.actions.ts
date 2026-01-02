@@ -237,22 +237,50 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
       }
     }
     
-    // 피드 값 저장
-    if (payload.attendanceStatus !== 'absent' && payload.feedValues && payload.feedValues.length > 0) {
-      const valueInserts = payload.feedValues.map(v => ({
-        feed_id: feedId,
-        set_id: v.setId,
-        option_id: v.optionId,
-        score: v.score ?? null,
-      }));
+    // ========================================
+    // 피드 값 저장 (일반 피드 + 시험 점수)
+    // ========================================
+    if (payload.attendanceStatus !== 'absent') {
+      const valueInserts: {
+        feed_id: string;
+        set_id: string;
+        option_id: string | null;
+        score: number | null;
+      }[] = [];
       
-      const { error: valuesError } = await supabase
-        .from('feed_values')
-        .insert(valueInserts);
+      // 일반 피드 값
+      if (payload.feedValues && payload.feedValues.length > 0) {
+        for (const v of payload.feedValues) {
+          valueInserts.push({
+            feed_id: feedId,
+            set_id: v.setId,
+            option_id: v.optionId,
+            score: v.score ?? null,
+          });
+        }
+      }
       
-      if (valuesError) {
-        console.error('feed_values insert error:', valuesError);
-        throw valuesError;
+      // 🆕 시험 점수 (option_id는 null, score만 저장)
+      if (payload.examScores && payload.examScores.length > 0) {
+        for (const exam of payload.examScores) {
+          valueInserts.push({
+            feed_id: feedId,
+            set_id: exam.setId,
+            option_id: null,  // 시험은 option 선택이 없음
+            score: exam.score,
+          });
+        }
+      }
+      
+      if (valueInserts.length > 0) {
+        const { error: valuesError } = await supabase
+          .from('feed_values')
+          .insert(valueInserts);
+        
+        if (valuesError) {
+          console.error('feed_values insert error:', valuesError);
+          throw valuesError;
+        }
       }
     }
     
@@ -266,7 +294,8 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
         key: payload.idempotencyKey,
         request_path: '/feed/save',
         response_status: 200,
-response_body: JSON.parse(JSON.stringify(response)),      });
+        response_body: JSON.parse(JSON.stringify(response)),
+      });
     
     revalidatePath('/dashboard/teacher/feed-input');
     

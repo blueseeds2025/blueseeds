@@ -1,6 +1,16 @@
 export type TemplateType = 'precise' | 'general' | 'text' | null;
 
-export type ReportCategory = 'study' | 'attitude' | 'attendance' | 'none';
+// ✅ export 추가 + 대문자로 통일
+export type ReportCategory = 
+  | 'VOCAB'
+  | 'HOMEWORK'
+  | 'ATTITUDE'
+  | 'COMPREHENSION'
+  | 'PROGRESS'
+  | 'UNCATEGORIZED'
+  | 'EVALUATION'
+  | 'EXCLUDED'  
+  | 'none';
 
 export interface FeedConfig {
   id: string;

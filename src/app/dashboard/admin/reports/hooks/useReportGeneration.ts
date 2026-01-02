@@ -113,6 +113,14 @@ export function useReportGeneration(
             weaknessThreshold: settingsResult.data.weakness_threshold,
             messageTone: settingsResult.data.messageTone,
           });
+          // 설정에서 가져온 템플릿으로 초기화!
+          const templateMap: Record<number, ReportStyleTemplate> = {
+            1: 'simple',
+            2: 'block',
+            3: 'heart',
+          };
+          const tmplType = settingsResult.data.weekly_template_type || 1;
+          setStyleTemplate(templateMap[tmplType] || 'simple');
         }
         setIsLoadingSettings(false);
         

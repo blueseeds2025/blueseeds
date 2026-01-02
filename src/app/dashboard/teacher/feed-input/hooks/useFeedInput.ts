@@ -4,11 +4,13 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   ClassStudent,
   FeedOptionSet,
+  ExamType,  // 🆕 추가
   TenantSettings,
 } from '../types';
 import {
   getTeacherClasses,
   getFeedOptionSets,
+  getExamTypes,  // 🆕 추가
   getTenantSettings,
   searchMakeupStudents,
 } from '../actions/feed.actions';
@@ -30,9 +32,11 @@ interface UseFeedInputProps {
 export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInputProps) {
   // 공통 설정
   const [optionSets, setOptionSets] = useState<FeedOptionSet[]>([]);
+  const [examTypes, setExamTypes] = useState<ExamType[]>([]);  // 🆕 추가
   const [tenantSettings, setTenantSettings] = useState<TenantSettings>({
     progress_enabled: false,
     materials_enabled: false,
+    exam_score_enabled: false,  // 🆕 추가
     makeup_defaults: {
       '병결': true,
       '학교행사': true,
@@ -42,6 +46,7 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
     },
     plan: 'basic',
     features: [],
+    operation_mode: 'solo',
   });
   
   // 보강 티켓 맵 (정규/보강 훅에서 공유)
@@ -50,13 +55,19 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
   // 옵션 세트 및 테넌트 설정 로드
   useEffect(() => {
     async function loadSettings() {
-      const [optionsResult, settingsResult] = await Promise.all([
+      const [optionsResult, examTypesResult, settingsResult] = await Promise.all([
         getFeedOptionSets(),
+        getExamTypes(),  // 🆕 추가
         getTenantSettings(),
       ]);
       
       if (optionsResult.success && optionsResult.data) {
         setOptionSets(optionsResult.data);
+      }
+      
+      // 🆕 시험 종류 로드
+      if (examTypesResult.success && examTypesResult.data) {
+        setExamTypes(examTypesResult.data);
       }
       
       if (settingsResult.success && settingsResult.data) {
@@ -71,6 +82,7 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
     classId,
     date,
     optionSets,
+    examTypes,  // 🆕 추가
     tenantSettings,
     makeupTicketMap,
     setMakeupTicketMap,
@@ -93,6 +105,7 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
     classId,
     date,
     optionSets,
+    tenantSettings,
   });
 
   // 기존 보강생 검색 (정규 목록에 추가) - 하위 호환
@@ -109,6 +122,12 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
       feedValues[set.id] = null;
     });
     
+    // 🆕 시험 점수 초기화
+    const examScores: Record<string, number | null> = {};
+    examTypes.forEach(exam => {
+      examScores[exam.id] = null;
+    });
+    
     regularFeed.setCardDataMap(prev => ({
       ...prev,
       [student.id]: {
@@ -122,6 +141,7 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
         progressText: undefined,
         previousProgress: undefined,
         feedValues,
+        examScores,  // 🆕 추가
         memoValues: { 'default': '' },
         materials: [],
         status: 'empty',
@@ -132,13 +152,14 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
     
     toast.success(`${student.name} 보강생 추가됨`);
     makeupFeed.setMakeupSearch('');
-  }, [regularFeed.cardDataMap, optionSets]);
+  }, [regularFeed.cardDataMap, optionSets, examTypes]);
 
   return {
     // 학생 및 피드 데이터
     students: regularFeed.students,
     cardDataMap: regularFeed.cardDataMap,
     optionSets,
+    examTypes,  // 🆕 추가
     tenantSettings,
     
     // 바텀시트
@@ -154,6 +175,7 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
     handleProgressChange: regularFeed.handleProgressChange,
     handleMemoChange: regularFeed.handleMemoChange,
     handleFeedValueChange: regularFeed.handleFeedValueChange,
+    handleExamScoreChange: regularFeed.handleExamScoreChange,  // 🆕 추가
     handleSave: regularFeed.handleSave,
     handleSaveAll: regularFeed.handleSaveAll,
     

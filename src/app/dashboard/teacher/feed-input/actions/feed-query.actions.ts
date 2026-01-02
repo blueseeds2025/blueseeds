@@ -6,6 +6,7 @@ import {
   ClassStudent,
   FeedOptionSet,
   FeedOption,
+  ExamType,
   SavedFeedData,
   TenantSettings
 } from '../types';
@@ -148,7 +149,7 @@ export async function getClassStudents(classId: string): Promise<{
 }
 
 // ============================================================================
-// 피드 옵션 세트 조회 (교사 권한 필터링 포함)
+// 피드 옵션 세트 조회 (교사 권한 필터링 포함) - normal 타입만
 // ============================================================================
 
 export async function getFeedOptionSets(): Promise<{
@@ -174,12 +175,14 @@ export async function getFeedOptionSets(): Promise<{
       return { success: false, error: '프로필을 찾을 수 없습니다' };
     }
     
+    // 🆕 type이 'normal'이거나 null인 것만 (exam_score 제외)
     const { data: sets, error: setsError } = await supabase
       .from('feed_option_sets')
-      .select('id, name, set_key, is_scored, is_required')
+      .select('id, name, set_key, is_scored, is_required, type')
       .eq('tenant_id', profile.tenant_id)
       .eq('is_active', true)
       .is('deleted_at', null)
+      .or('type.is.null,type.eq.normal')
       .order('created_at');
     
     if (setsError) throw setsError;
@@ -268,6 +271,51 @@ export async function getFeedOptionSets(): Promise<{
 }
 
 // ============================================================================
+// 🆕 시험 종류 조회 (type='exam_score')
+// ============================================================================
+
+export async function getExamTypes(): Promise<{
+  success: boolean;
+  data?: ExamType[];
+  error?: string;
+}> {
+  try {
+    const supabase = await createClient();
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { success: false, error: '로그인이 필요합니다' };
+    }
+    
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('tenant_id')
+      .eq('id', user.id)
+      .single();
+    
+    if (!profile) {
+      return { success: false, error: '프로필을 찾을 수 없습니다' };
+    }
+    
+    const { data, error } = await supabase
+      .from('feed_option_sets')
+      .select('id, name, set_key')
+      .eq('tenant_id', profile.tenant_id)
+      .eq('type', 'exam_score')
+      .eq('is_active', true)
+      .is('deleted_at', null)
+      .order('created_at');
+    
+    if (error) throw error;
+    
+    return { success: true, data: data || [] };
+  } catch (error) {
+    console.error('getExamTypes error:', error);
+    return { success: false, error: '시험 종류를 불러오는데 실패했습니다' };
+  }
+}
+
+// ============================================================================
 // 특정 날짜의 저장된 피드 데이터 조회
 // ============================================================================
 
@@ -337,12 +385,38 @@ export async function getSavedFeeds(
       }
     }
     
+    // 🆕 시험 타입 세트 ID 목록 조회 (exam_score 구분용)
+    const { data: examSets } = await supabase
+      .from('feed_option_sets')
+      .select('id')
+      .eq('tenant_id', profile.tenant_id)
+      .eq('type', 'exam_score')
+      .eq('is_active', true);
+    
+    const examSetIds = new Set((examSets || []).map(s => s.id));
+    
     const result: Record<string, SavedFeedData> = {};
     
     for (const feed of feeds || []) {
       if (!feed.student_id) continue;
       
       const values = feedValuesMap[feed.id] || [];
+      
+      // 🆕 일반 피드값과 시험 점수 분리
+      const feedValues = values
+        .filter(v => v.set_id && v.option_id && !examSetIds.has(v.set_id))
+        .map(v => ({
+          setId: v.set_id!,
+          optionId: v.option_id!,
+          score: v.score,
+        }));
+      
+      const examScores = values
+        .filter(v => v.set_id && examSetIds.has(v.set_id) && v.score !== null)
+        .map(v => ({
+          setId: v.set_id!,
+          score: v.score,
+        }));
       
       result[feed.student_id] = {
         id: feed.id,
@@ -353,13 +427,8 @@ export async function getSavedFeeds(
         isMakeup: feed.is_makeup ?? false,
         progressText: feed.progress_text ?? undefined,
         memoValues: (feed.memo_values as Record<string, string>) || {},
-        feedValues: values
-          .filter(v => v.set_id && v.option_id)
-          .map(v => ({
-            setId: v.set_id!,
-            optionId: v.option_id!,
-            score: v.score,
-          })),
+        feedValues,
+        examScores,
       };
     }
     
@@ -399,7 +468,7 @@ export async function getTenantSettings(): Promise<{
     
     const { data: tenant } = await supabase
       .from('tenants')
-      .select('settings, plan')
+      .select('settings, plan, operation_mode')
       .eq('id', profile.tenant_id)
       .single();
     
@@ -422,6 +491,7 @@ export async function getTenantSettings(): Promise<{
       data: {
         progress_enabled: (settings.progress_enabled as boolean) ?? false,
         materials_enabled: (settings.materials_enabled as boolean) ?? false,
+        exam_score_enabled: (settings.exam_score_enabled as boolean) ?? false,  // 🆕 추가
         makeup_defaults: (settings.makeup_defaults as Record<string, boolean>) ?? {
           '병결': true,
           '학교행사': true,
@@ -431,6 +501,7 @@ export async function getTenantSettings(): Promise<{
         },
         plan: (tenant?.plan as 'basic' | 'premium' | 'enterprise') ?? 'basic',
         features,
+        operation_mode: (tenant?.operation_mode as 'solo' | 'team') ?? 'solo',
       },
     };
   } catch (error) {

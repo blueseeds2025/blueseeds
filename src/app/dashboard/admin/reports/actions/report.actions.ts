@@ -53,10 +53,10 @@ async function getAuthContext() {
 }
 
 // ============================================================================
-// 리포트 설정 조회
+// 테넌트 플랜 조회
 // ============================================================================
 
-export async function getReportSettings(): Promise<ActionResult<ReportSettings & { messageTone: MessageTone }>> {
+export async function getTenantPlan(): Promise<ActionResult<{ plan: 'basic' | 'premium' }>> {
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
@@ -64,10 +64,42 @@ export async function getReportSettings(): Promise<ActionResult<ReportSettings &
     }
     const { supabase, profile } = ctx;
     
-    // report_settings 조회 (없으면 기본값)
+    const { data: tenant, error } = await supabase
+      .from('tenants')
+      .select('plan')
+      .eq('id', profile.tenant_id)
+      .single();
+    
+    if (error) {
+      return { ok: false, message: '플랜 정보를 불러오는데 실패했습니다' };
+    }
+    
+    return {
+      ok: true,
+      data: { plan: (tenant?.plan as 'basic' | 'premium') || 'basic' },
+    };
+  } catch (error) {
+    console.error('getTenantPlan error:', error);
+    return { ok: false, message: '서버 오류가 발생했습니다' };
+  }
+}
+
+// ============================================================================
+// 리포트 설정 조회
+// ============================================================================
+
+export async function getReportSettings(): Promise<ActionResult<ReportSettings & { messageTone: MessageTone; weekly_template_type: number }>> {
+  try {
+    const ctx = await getAuthContext();
+    if ('error' in ctx) {
+      return { ok: false, message: ctx.error || '인증 오류가 발생했습니다' };
+    }
+    const { supabase, profile } = ctx;
+    
+    // report_settings 조회 (weekly_template_type 추가!)
     const { data: settings } = await supabase
       .from('report_settings')
-      .select('id, tenant_id, strength_threshold, weakness_threshold, created_at, updated_at, deleted_at')
+      .select('id, tenant_id, strength_threshold, weakness_threshold, weekly_template_type, created_at, updated_at, deleted_at')
       .eq('tenant_id', profile.tenant_id)
       .is('deleted_at', null)
       .single();
@@ -79,20 +111,22 @@ export async function getReportSettings(): Promise<ActionResult<ReportSettings &
       .eq('id', profile.tenant_id)
       .single();
     
-    const reportSettings = settings || {
-      id: '',
-      tenant_id: profile.tenant_id,
-      strength_threshold: DEFAULT_STRENGTH_THRESHOLD,
-      weakness_threshold: DEFAULT_WEAKNESS_THRESHOLD,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      deleted_at: null,
-    };
+  const reportSettings: ReportSettings = {
+  id: settings?.id ?? '',
+  tenant_id: settings?.tenant_id ?? profile.tenant_id,
+  strength_threshold: settings?.strength_threshold ?? DEFAULT_STRENGTH_THRESHOLD,
+  weakness_threshold: settings?.weakness_threshold ?? DEFAULT_WEAKNESS_THRESHOLD,
+  weekly_template_type: settings?.weekly_template_type ?? 1,
+  created_at: settings?.created_at ?? new Date().toISOString(),
+  updated_at: settings?.updated_at ?? new Date().toISOString(),
+  deleted_at: settings?.deleted_at ?? null,
+};
     
     return {
       ok: true,
       data: {
         ...reportSettings,
+        weekly_template_type: reportSettings.weekly_template_type || 1,
         messageTone: (tenant?.message_tone as MessageTone) || 'friendly',
       },
     };
@@ -122,18 +156,19 @@ export async function updateReportSettings(params: {
       return { ok: false, message: '설정 변경 권한이 없습니다' };
     }
     
-    const { data, error } = await supabase
-      .from('report_settings')
-      .upsert({
-        tenant_id: profile.tenant_id,
-        strength_threshold: params.strengthThreshold,
-        weakness_threshold: params.weaknessThreshold,
-        updated_at: new Date().toISOString(),
-      }, {
-        onConflict: 'tenant_id',
-      })
-      .select('id, tenant_id, strength_threshold, weakness_threshold, created_at, updated_at, deleted_at')
-      .single();
+   // 수정 - weekly_template_type 추가
+const { data, error } = await supabase
+  .from('report_settings')
+  .upsert({
+    tenant_id: profile.tenant_id,
+    strength_threshold: params.strengthThreshold,
+    weakness_threshold: params.weaknessThreshold,
+    updated_at: new Date().toISOString(),
+  }, {
+    onConflict: 'tenant_id',
+  })
+  .select('id, tenant_id, strength_threshold, weakness_threshold, weekly_template_type, created_at, updated_at, deleted_at')
+  .single();
     
     if (error) throw error;
     

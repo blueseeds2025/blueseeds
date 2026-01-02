@@ -27,7 +27,11 @@ import {
 
 import { feedStyles, cn } from '@/styles/feedSettings.styles';
 import type { OptionSet, Option, ReportCategory } from '@/types/feed-settings';
-import { REPORT_CATEGORIES, REPORT_CATEGORY_LABEL } from '../feedSettings.constants';
+import { 
+  REPORT_CATEGORIES, 
+  REPORT_CATEGORY_LABEL,
+  REPORT_CATEGORY_DESCRIPTION,
+} from '../feedSettings.constants';
 
 import SortableOptionRow from './SortableOptionRow';
 
@@ -244,7 +248,7 @@ export default function OptionSetCard({
 
       {expanded && (
         <CardContent className={feedStyles.card.expandedContent}>
-          {/* AI report category (set-level) */}
+          {/* 카테고리 선택 (set-level) */}
           <div
             className={cn(
               feedStyles.layout.categoryRow,
@@ -254,47 +258,56 @@ export default function OptionSetCard({
             {!isEditMode && (
               <div className={feedStyles.text.categoryHint}>
                 <Info className={cn(feedStyles.icon.info, 'w-3 h-3')} />
-                AI 매핑 편집 모드를 켜면 수정할 수 있습니다
+                카테고리 편집 모드를 켜면 수정할 수 있습니다
               </div>
             )}
 
-            <div className="flex items-center gap-2">
-              <span className="font-semibold">AI 리포트 영역:</span>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold">카테고리:</span>
 
-              {REPORT_CATEGORIES.map((cat) => {
-                const isActive = categoryValue === cat;
-                const disabled = !isEditMode;
+                {REPORT_CATEGORIES.map((cat) => {
+                  const isActive = categoryValue === cat;
+                  const disabled = !isEditMode;
 
-                return (
-                  <button
-                    key={cat}
-                    type="button"
-                    title={disabled ? '편집하려면 상단에서 AI 매핑 편집 모드를 켜세요' : ''}
-                    className={
-                      feedStyles.categoryButton.base +
-                      ' ' +
-                      (isActive ? feedStyles.categoryButton.active : feedStyles.categoryButton.inactive) +
-                      ' ' +
-                      (disabled ? feedStyles.categoryButton.disabled : feedStyles.categoryButton.interactiveHover)
-                    }
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      if (disabled) return;
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      title={disabled ? '편집하려면 상단에서 카테고리 편집 모드를 켜세요' : REPORT_CATEGORY_DESCRIPTION[cat]}
+                      className={
+                        feedStyles.categoryButton.base +
+                        ' ' +
+                        (isActive ? feedStyles.categoryButton.active : feedStyles.categoryButton.inactive) +
+                        ' ' +
+                        (disabled ? feedStyles.categoryButton.disabled : feedStyles.categoryButton.interactiveHover)
+                      }
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        if (disabled) return;
 
-                      const ok = await confirm({
-                        title: 'AI 리포트 영역 변경',
-                        description: '⚠️ 이 설정을 변경하면 이 세트의 모든 옵션 AI 리포트 영역도 동일하게 일괄 변경됩니다.\n\n정말 변경하시겠습니까?',
-                        confirmLabel: '변경',
-                      });
-                      if (!ok) return;
+                        const ok = await confirm({
+                          title: '카테고리 변경',
+                          description: '⚠️ 이 설정을 변경하면 이 세트의 모든 옵션 카테고리도 동일하게 일괄 변경됩니다.\n\n정말 변경하시겠습니까?',
+                          confirmLabel: '변경',
+                        });
+                        if (!ok) return;
 
-                      onChangeCategory(cat);
-                    }}
-                  >
-                    {REPORT_CATEGORY_LABEL[cat]}
-                  </button>
-                );
-              })}
+                        onChangeCategory(cat);
+                      }}
+                    >
+                      {REPORT_CATEGORY_LABEL[cat]}
+                    </button>
+                  );
+                })}
+              </div>
+              
+              {/* 선택된 카테고리 설명 표시 */}
+              {categoryValue && (
+                <p className="text-xs text-gray-500 ml-[70px]">
+                  {REPORT_CATEGORY_DESCRIPTION[categoryValue]}
+                </p>
+              )}
             </div>
           </div>
 

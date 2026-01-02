@@ -4,7 +4,7 @@ import { useRef, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { feedStyles } from '@/styles/feedSettings.styles';
-import { REPORT_CATEGORIES, REPORT_CATEGORY_LABEL } from '../feedSettings.constants';
+import { REPORT_CATEGORIES, REPORT_CATEGORY_LABEL, REPORT_CATEGORY_DESCRIPTION } from '../feedSettings.constants';
 import type { ReportCategory, TemplateType } from '@/types/feed-settings';
 
 type Props = {
@@ -36,7 +36,7 @@ export default function AddItemForm({
       : '(10점 단위)'
     : '(방식 미선택)';
 
-  // AI 리포트 영역 선택 완료 여부
+  // 카테고리 선택 완료 여부
   const isCategorySelected = newItemCategory !== null;
 
   // 카테고리 선택되면 입력창에 포커스
@@ -56,7 +56,7 @@ export default function AddItemForm({
       </CardHeader>
 
       <CardContent>
-        {/* AI category - 선택 전이면 테두리 강조 */}
+        {/* 카테고리 선택 - 선택 전이면 테두리 강조 */}
         <div 
           className={`
             mt-4 rounded-lg p-4 transition-all
@@ -68,7 +68,7 @@ export default function AddItemForm({
         >
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm font-semibold text-[#37352F]">
-              AI 리포트 영역 <span className="text-red-500">*</span>
+              카테고리 <span className="text-red-500">*</span>
             </p>
             {!isCategorySelected && (
               <span className="text-xs px-3 py-1 rounded-full bg-[#6366F1] text-white font-medium animate-pulse">
@@ -78,8 +78,7 @@ export default function AddItemForm({
           </div>
 
           <p className="text-xs text-[#9B9A97] mb-3">
-            이 평가항목이 AI 리포트에서 어느 문단(학습 / 태도 / 출결 / 없음)에 들어갈지 한 번만
-            선택해주세요.
+            이 평가항목이 월간 리포트에서 어느 섹션에 들어갈지 선택해주세요.
           </p>
 
           <div className="flex gap-3 text-sm">
@@ -91,6 +90,7 @@ export default function AddItemForm({
                 <button
                   key={cat}
                   type="button"
+                  title={REPORT_CATEGORY_DESCRIPTION[cat]}
                   className={`
                     flex-1 px-4 py-3 rounded-lg border text-center font-medium transition-all
                     ${isActive
@@ -107,21 +107,24 @@ export default function AddItemForm({
           </div>
 
           <p className="mt-2 text-xs text-[#9B9A97]">
-            * 처음에 한 번 제대로 맞춰두면 AI 리포트 구조가 더 안정적입니다.
+            * 처음에 한 번 제대로 맞춰두면 리포트 구조가 더 안정적입니다.
           </p>
 
           <div className="mt-3 space-y-1 text-xs text-[#9B9A97]">
             <p>
-              <span className="font-medium text-[#37352F]">학습</span> : 교재 진도, 이해도, 문제 해결 등 수업 내용 평가
+              <span className="font-medium text-[#37352F]">태도</span> : {REPORT_CATEGORY_DESCRIPTION['ATTITUDE']}
             </p>
             <p>
-              <span className="font-medium text-[#37352F]">태도</span> : 숙제 성실도, 참여도, 집중도 등 학습 습관
+              <span className="font-medium text-[#37352F]">과제</span> : {REPORT_CATEGORY_DESCRIPTION['HOMEWORK']}
             </p>
             <p>
-              <span className="font-medium text-[#37352F]">출결</span> : 등원/지각/조퇴/결석 등 출결 관련
+              <span className="font-medium text-[#37352F]">평가</span> : {REPORT_CATEGORY_DESCRIPTION['EVALUATION']}
             </p>
             <p>
-              <span className="font-medium text-[#37352F]">없음</span> : AI 서술형 문단에는 포함하지 않음
+              <span className="font-medium text-[#37352F]">진도</span> : {REPORT_CATEGORY_DESCRIPTION['PROGRESS']}
+            </p>
+            <p>
+              <span className="font-medium text-[#37352F]">리포트 제외</span> : {REPORT_CATEGORY_DESCRIPTION['EXCLUDED']}
             </p>
           </div>
         </div>
@@ -147,7 +150,7 @@ export default function AddItemForm({
           />
           {!isCategorySelected && (
             <p className="mt-1 text-xs text-[#9B9A97]">
-              ↑ AI 리포트 영역을 먼저 선택해주세요
+              ↑ 카테고리를 먼저 선택해주세요
             </p>
           )}
         </div>

@@ -6,6 +6,7 @@ import {
   ClassStudent,
   FeedOptionSet,
   StudentCardData,
+  TenantSettings,
   AttendanceStatus,
   CardStatus,
   SaveFeedPayload,
@@ -24,9 +25,10 @@ interface UseFeedMakeupProps {
   classId: string;
   date: string;
   optionSets: FeedOptionSet[];
+  tenantSettings: TenantSettings;
 }
 
-export function useFeedMakeup({ classId, date, optionSets }: UseFeedMakeupProps) {
+export function useFeedMakeup({ classId, date, optionSets, tenantSettings }: UseFeedMakeupProps) {
   // 보강 대기 목록
   const [pendingMakeupTickets, setPendingMakeupTickets] = useState<PendingMakeupTicket[]>([]);
   const [isLoadingMakeupTickets, setIsLoadingMakeupTickets] = useState(false);
@@ -84,6 +86,28 @@ export function useFeedMakeup({ classId, date, optionSets }: UseFeedMakeupProps)
       savedData: undefined,
       makeupTicketId: ticketId,
     };
+  }
+
+  // 카드 상태 계산
+  function calculateCardStatus(data: StudentCardData): CardStatus {
+    if (data.attendanceStatus === 'absent') {
+      if (!data.absenceReason) return 'error';
+      if (data.absenceReason === '기타' && !data.absenceReasonDetail) return 'error';
+      if (!data.isDirty && data.savedData) return 'saved';
+      return 'dirty';
+    }
+    
+    // 분업형(team)이 아니면 필수 체크 (담임형은 전부 필수)
+    if (tenantSettings.operation_mode !== 'team') {
+      for (const set of optionSets) {
+        if (!data.feedValues[set.id]) {
+          return 'error';
+        }
+      }
+    }
+    
+    if (!data.isDirty && data.savedData) return 'saved';
+    return 'dirty';
   }
 
   // 보강 대기 목록 조회
@@ -154,19 +178,18 @@ export function useFeedMakeup({ classId, date, optionSets }: UseFeedMakeupProps)
       const cardData = prev[ticketId];
       if (!cardData) return prev;
       
-      return {
-        ...prev,
-        [ticketId]: {
-          ...cardData,
-          attendanceStatus: status,
-          absenceReason: reason as AbsenceReason | undefined,
-          absenceReasonDetail: detail,
-          isDirty: true,
-          status: 'dirty' as CardStatus,
-        },
+      const updated = {
+        ...cardData,
+        attendanceStatus: status,
+        absenceReason: reason as AbsenceReason | undefined,
+        absenceReasonDetail: detail,
+        isDirty: true,
       };
+      updated.status = calculateCardStatus(updated);
+      
+      return { ...prev, [ticketId]: updated };
     });
-  }, []);
+  }, [optionSets, tenantSettings]);
 
   // 보강 카드 진도 변경
   const handleMakeupProgressChange = useCallback((ticketId: string, progress: string) => {
@@ -174,17 +197,16 @@ export function useFeedMakeup({ classId, date, optionSets }: UseFeedMakeupProps)
       const cardData = prev[ticketId];
       if (!cardData) return prev;
       
-      return {
-        ...prev,
-        [ticketId]: {
-          ...cardData,
-          progressText: progress,
-          isDirty: true,
-          status: 'dirty' as CardStatus,
-        },
+      const updated = {
+        ...cardData,
+        progressText: progress,
+        isDirty: true,
       };
+      updated.status = calculateCardStatus(updated);
+      
+      return { ...prev, [ticketId]: updated };
     });
-  }, []);
+  }, [optionSets, tenantSettings]);
 
   // 보강 카드 메모 변경
   const handleMakeupMemoChange = useCallback((ticketId: string, memoId: string, value: string) => {
@@ -192,20 +214,19 @@ export function useFeedMakeup({ classId, date, optionSets }: UseFeedMakeupProps)
       const cardData = prev[ticketId];
       if (!cardData) return prev;
       
-      return {
-        ...prev,
-        [ticketId]: {
-          ...cardData,
-          memoValues: {
-            ...cardData.memoValues,
-            [memoId]: value,
-          },
-          isDirty: true,
-          status: 'dirty' as CardStatus,
+      const updated = {
+        ...cardData,
+        memoValues: {
+          ...cardData.memoValues,
+          [memoId]: value,
         },
+        isDirty: true,
       };
+      updated.status = calculateCardStatus(updated);
+      
+      return { ...prev, [ticketId]: updated };
     });
-  }, []);
+  }, [optionSets, tenantSettings]);
 
   // 보강 카드 피드 값 변경
   const handleMakeupFeedValueChange = useCallback((ticketId: string, setId: string, optionId: string) => {
@@ -213,20 +234,19 @@ export function useFeedMakeup({ classId, date, optionSets }: UseFeedMakeupProps)
       const cardData = prev[ticketId];
       if (!cardData) return prev;
       
-      return {
-        ...prev,
-        [ticketId]: {
-          ...cardData,
-          feedValues: {
-            ...cardData.feedValues,
-            [setId]: optionId,
-          },
-          isDirty: true,
-          status: 'dirty' as CardStatus,
+      const updated = {
+        ...cardData,
+        feedValues: {
+          ...cardData.feedValues,
+          [setId]: optionId,
         },
+        isDirty: true,
       };
+      updated.status = calculateCardStatus(updated);
+      
+      return { ...prev, [ticketId]: updated };
     });
-  }, []);
+  }, [optionSets, tenantSettings]);
 
   // 보강 피드 저장 (단일)
   const handleMakeupSave = useCallback(async (ticketId: string) => {
@@ -294,6 +314,13 @@ export function useFeedMakeup({ classId, date, optionSets }: UseFeedMakeupProps)
     
     if (dirtyCards.length === 0) {
       toast.info('저장할 변경사항이 없습니다');
+      return;
+    }
+    
+    // Premium 플랜이면 error 체크
+    const errorCards = dirtyCards.filter(([_, card]) => card.status === 'error');
+    if (errorCards.length > 0) {
+      toast.error(`${errorCards.length}명의 필수 항목이 누락되었습니다`);
       return;
     }
     

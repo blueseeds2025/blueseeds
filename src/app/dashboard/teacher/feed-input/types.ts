@@ -46,6 +46,13 @@ export interface FeedOptionSet {
   options: FeedOption[];
 }
 
+// 🆕 시험 타입 (feed_option_sets에서 type='exam_score')
+export interface ExamType {
+  id: string;
+  name: string;
+  set_key: string;
+}
+
 // 메모 필드
 export interface MemoField {
   id: string;
@@ -58,6 +65,12 @@ export interface MaterialUsage {
   id?: string;
   materialName: string;
   quantity: number;
+}
+
+// 🆕 시험 점수 값
+export interface ExamScoreValue {
+  setId: string;
+  score: number | null;
 }
 
 // DB에 저장된 피드 데이터
@@ -75,6 +88,8 @@ export interface SavedFeedData {
     optionId: string;
     score?: number | null;
   }[];
+  // 🆕 시험 점수
+  examScores?: ExamScoreValue[];
 }
 
 // 학생 카드 데이터 (로컬 상태)
@@ -96,6 +111,9 @@ export interface StudentCardData {
   
   // 피드 항목별 값
   feedValues: Record<string, string | null>;
+  
+  // 🆕 시험 점수 (setId → score)
+  examScores: Record<string, number | null>;
   
   // 메모 (필드별)
   memoValues: Record<string, string>;
@@ -143,6 +161,9 @@ export interface SaveFeedPayload {
     score?: number | null;
   }[];
   
+  // 🆕 시험 점수
+  examScores?: ExamScoreValue[];
+  
   idempotencyKey: string;
 }
 
@@ -156,13 +177,17 @@ export interface SaveFeedResponse {
 // 테넌트 설정
 // 요금제 타입
 export type PlanType = 'basic' | 'premium' | 'enterprise';
+// 운영 모드 타입
+export type OperationMode = 'solo' | 'team';  // 담임형 / 분업형
 
 export interface TenantSettings {
   progress_enabled: boolean;
   materials_enabled: boolean;
+  exam_score_enabled: boolean;  // 🆕 시험 점수 활성화
   makeup_defaults?: Record<string, boolean>;
   plan: PlanType;
   features: string[];  // 활성화된 기능 목록
+  operation_mode: OperationMode;  // 운영 모드
 }
 
 // 바텀시트 상태

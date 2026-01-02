@@ -114,7 +114,7 @@ export async function saveFeedPreset(params: {
         set_key: s.set_key ?? `set_${idx}`,
         is_scored: !!s.is_scored,
         score_step: s.score_step ?? null,
-        default_report_category: (s.default_report_category ?? 'study') as any,
+       default_report_category: (s.default_report_category ?? 'EVALUATION') as any,
         display_order: idx,
       }));
 
@@ -147,7 +147,7 @@ export async function saveFeedPreset(params: {
             preset_set_id: presetSetId,
             label: o.label,
             score: o.score ?? null,
-            report_category: (o.report_category ?? s.default_report_category ?? 'study') as any,
+            report_category: (o.report_category ?? s.default_report_category ?? 'EVALUATION') as any,
             display_order: o.display_order ?? j,
           });
         });
@@ -399,7 +399,7 @@ export async function applyFeedPreset(presetId: string): Promise<ActionResult> {
             is_scored: s.is_scored,
             score_step: s.score_step ?? null,
             is_active: true,
-            default_report_category: s.default_report_category ?? 'study',
+           default_report_category: s.default_report_category ?? 'EVALUATION',
           })
           .select('*')
           .single();
@@ -434,7 +434,7 @@ export async function applyFeedPreset(presetId: string): Promise<ActionResult> {
           score: o.score ?? null,
           display_order: o.display_order ?? idx,
           is_active: true,
-          report_category: o.report_category ?? (s.default_report_category ?? 'study'),
+         report_category: o.report_category ?? (s.default_report_category ?? 'EVALUATION'),
         }));
 
         const { error: optInsertErr } = await sb.from('feed_options').insert(inserts);

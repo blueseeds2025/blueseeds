@@ -18,22 +18,25 @@ import {
   UserX,
   GraduationCap,
   School,
-  ClipboardList
+  ClipboardList,
+  Sliders
 } from 'lucide-react';
 import type { Database } from '@/lib/supabase/types';
 
 // 메뉴 스켈레톤 컴포넌트
+const SKELETON_WIDTHS = [72, 85, 68, 90, 76, 82, 70, 88];
+
 function MenuSkeleton({ isSidebarOpen }: { isSidebarOpen: boolean }) {
   return (
     <div className="p-4 space-y-2">
-      {[...Array(8)].map((_, i) => (
+      {SKELETON_WIDTHS.map((width, i) => (
         <div
           key={i}
           className="flex items-center gap-3 px-3 py-2"
         >
           <div className="w-5 h-5 bg-gray-200 rounded animate-pulse" />
           {isSidebarOpen && (
-            <div className="h-4 bg-gray-200 rounded animate-pulse" style={{ width: `${60 + Math.random() * 40}px` }} />
+            <div className="h-4 bg-gray-200 rounded animate-pulse" style={{ width: `${width}px` }} />
           )}
         </div>
       ))}
@@ -46,7 +49,7 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const [userRole, setUserRole] = useState<string | null>(null); // null = 로딩 중
+  const [userRole, setUserRole] = useState<string | null>(null);
   const [userName, setUserName] = useState<string>('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   
@@ -71,11 +74,9 @@ export default function DashboardLayout({
           setUserRole(profile.role);
           setUserName(profile.display_name);
         } else {
-          // 프로필이 없는 경우에도 로딩 완료 처리
           setUserRole('');
         }
       } else {
-        // 로그인 안 된 경우
         setUserRole('');
       }
     };
@@ -87,13 +88,18 @@ export default function DashboardLayout({
     router.push('/auth/login');
   };
 
-  // role이 확정된 후에만 메뉴 아이템 생성
   const menuItems = userRole ? [
     { 
       icon: Home, 
       label: '대시보드', 
       href: userRole === 'owner' ? '/dashboard/admin' : '/dashboard/teacher',
       show: true 
+    },
+    { 
+      icon: Sliders, 
+      label: '학원 설정', 
+      href: '/dashboard/admin/settings',
+      show: userRole === 'owner' 
     },
     { 
       icon: Settings,  
@@ -161,12 +167,6 @@ export default function DashboardLayout({
       href: '/dashboard/inventory',
       show: userRole === 'owner' 
     },
-    { 
-      icon: Settings, 
-      label: '설정', 
-      href: '/dashboard/settings',
-      show: userRole === 'owner' 
-    },
   ] : [];
 
   const isLoading = userRole === null;
@@ -192,7 +192,6 @@ export default function DashboardLayout({
 
         <div className="p-4 border-b">
           {isLoading ? (
-            // 유저 정보 스켈레톤
             <div className={`${!isSidebarOpen && 'hidden'}`}>
               <div className="h-4 w-20 bg-gray-200 rounded animate-pulse mb-1" />
               <div className="h-3 w-12 bg-gray-200 rounded animate-pulse" />
@@ -213,10 +212,10 @@ export default function DashboardLayout({
         {isLoading ? (
           <MenuSkeleton isSidebarOpen={isSidebarOpen} />
         ) : (
-          <nav className="p-4">
+          <nav className="p-4 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 180px)' }}>
             {menuItems.filter(item => item.show).map((item) => {
               const Icon = item.icon;
-              const isActive = pathname === item.href;
+              const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
               
               return (
                 <button
@@ -224,7 +223,7 @@ export default function DashboardLayout({
                   onClick={() => router.push(item.href)}
                   className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg mb-1 transition-colors ${
                     isActive 
-                      ? 'bg-blue-50 text-blue-600' 
+                      ? 'bg-[#6366F1]/10 text-[#6366F1]' 
                       : 'hover:bg-gray-100 text-gray-700'
                   }`}
                 >

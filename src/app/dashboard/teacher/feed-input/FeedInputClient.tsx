@@ -57,6 +57,7 @@ export default function FeedInputClient({
     students,
     cardDataMap,
     optionSets,
+    examTypes,  // 🆕 추가
     tenantSettings,
     memoFields,
     isLoading,
@@ -70,6 +71,7 @@ export default function FeedInputClient({
     handleProgressChange,
     handleMemoChange,
     handleFeedValueChange,
+    handleExamScoreChange,  // 🆕 추가
     handleSave,
     handleSaveAll,
     addMemoField,
@@ -298,203 +300,150 @@ export default function FeedInputClient({
             </div>
           </div>
           
-          {/* 추가된 메모 필드 태그들 */}
-          {memoFields.length > 1 && (
-            <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-[#E5E7EB]">
-              <span className="text-xs text-[#6B7280]">메모 항목:</span>
-              {memoFields.map((field, idx) => (
-                <span 
-                  key={field.id} 
-                  className={`
-                    px-2.5 py-1 rounded-full text-xs font-medium
-                    ${idx === 0 
-                      ? 'bg-[#F3F4F6] text-[#6B7280]' 
-                      : 'bg-[#EEF2FF] text-[#6366F1]'
-                    }
-                  `}
-                >
-                  {field.name}
-                  {idx > 0 && (
-                    <button
-                      onClick={() => removeMemoField(field.id)}
-                      className="ml-1.5 text-[#9CA3AF] hover:text-[#EF4444] transition-colors"
-                    >
-                      ×
-                    </button>
-                  )}
-                </span>
-              ))}
+          {/* 메모 추가 모달 */}
+          {showAddMemo && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-xl p-6 w-full max-w-sm mx-4">
+                <h3 className="text-lg font-semibold text-[#1F2937] mb-4">메모 필드 추가</h3>
+                <input
+                  type="text"
+                  value={newMemoName}
+                  onChange={(e) => setNewMemoName(e.target.value)}
+                  placeholder="메모 이름 (예: 숙제, 준비물)"
+                  className="w-full px-4 py-2 border border-[#E5E7EB] rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-[#6366F1]/30"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleAddMemoField();
+                    if (e.key === 'Escape') setShowAddMemo(false);
+                  }}
+                />
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => setShowAddMemo(false)}
+                    className="px-4 py-2 text-[#6B7280] hover:bg-[#F3F4F6] rounded-lg transition-colors"
+                  >
+                    취소
+                  </button>
+                  <button
+                    onClick={handleAddMemoField}
+                    disabled={!newMemoName.trim()}
+                    className="px-4 py-2 bg-[#6366F1] text-white rounded-lg hover:bg-[#4F46E5] disabled:opacity-50 transition-colors"
+                  >
+                    추가
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
       </div>
       
-      {/* 메모 추가 모달 */}
-      {showAddMemo && (
-        <>
-          <div 
-            className="fixed inset-0 bg-black/30 z-40"
-            onClick={() => setShowAddMemo(false)}
-          />
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-white rounded-xl shadow-xl p-6 w-80">
-            <h3 className="font-semibold text-lg text-[#1F2937] mb-4">메모 항목 추가</h3>
-            <input
-              type="text"
-              placeholder="항목 이름 (예: 준비물, 알림장)"
-              value={newMemoName}
-              onChange={(e) => setNewMemoName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAddMemoField()}
-              autoFocus
-              className="w-full px-3 py-2.5 border border-[#E5E7EB] rounded-lg mb-4 text-[#1F2937] placeholder-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#6366F1]/30"
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowAddMemo(false)}
-                className="flex-1 px-4 py-2.5 bg-[#F3F4F6] hover:bg-[#E5E7EB] text-[#1F2937] rounded-lg transition-colors"
-              >
-                취소
-              </button>
-              <button
-                onClick={handleAddMemoField}
-                disabled={!newMemoName.trim()}
-                className="flex-1 px-4 py-2.5 bg-[#6366F1] hover:bg-[#4F46E5] text-white rounded-lg transition-colors disabled:opacity-50"
-              >
-                추가
-              </button>
-            </div>
-          </div>
-        </>
-      )}
-      
-      {/* 보강 전체화면 모달 */}
+      {/* 보강 모달 */}
       {makeupPanelOpen && (
         <>
-          {/* 블러 배경 */}
+          {/* 배경 오버레이 */}
           <div 
-            className="fixed inset-0 z-40 bg-white/60 backdrop-blur-sm"
+            className="fixed inset-0 bg-black/50 z-40"
             onClick={handleCloseMakeupModal}
           />
           
-          {/* 모달 본체 */}
-          <div className="fixed inset-4 md:inset-8 lg:inset-12 z-50 bg-[#F7F6F3] rounded-2xl shadow-2xl border border-[#E5E7EB] overflow-hidden flex flex-col">
-          {/* 헤더 */}
-          <div className="flex-shrink-0 bg-white border-b border-[#E5E7EB]">
-            <div className="px-4 md:px-6 py-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <h1 className="text-xl font-bold text-[#1F2937] flex items-center gap-2">
-                    <span>📋</span>
-                    보강 수업
-                  </h1>
-                  <span className="text-sm text-[#6B7280]">
-                    {formatDisplayDate(new Date(selectedDate))}
+          {/* 모달 */}
+          <div className="fixed inset-4 md:inset-10 lg:inset-16 bg-white rounded-2xl z-50 flex flex-col overflow-hidden shadow-2xl">
+            {/* 헤더 */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#E5E7EB]">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">📋</span>
+                <h2 className="text-xl font-bold text-[#1F2937]">보강 수업 입력</h2>
+                {makeupDirtyCount > 0 && (
+                  <span className="px-2 py-0.5 bg-[#6366F1] text-white text-xs rounded-full">
+                    {makeupDirtyCount}명 미저장
                   </span>
-                </div>
-                
-                <div className="flex items-center gap-3">
-                  {/* 저장 버튼 */}
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {makeupDirtyCount > 0 && (
                   <button
                     onClick={handleSaveMakeupAndClose}
-                    disabled={isSaving || makeupDirtyCount === 0}
-                    className={`
-                      px-6 py-2 rounded-lg font-medium transition-all
-                      ${makeupDirtyCount > 0
-                        ? 'bg-[#7C3AED] hover:bg-[#6D28D9] text-white'
-                        : 'bg-[#E5E7EB] text-[#9CA3AF] cursor-not-allowed'
-                      }
-                    `}
+                    className="px-4 py-2 bg-[#7C3AED] hover:bg-[#6D28D9] text-white rounded-lg text-sm font-medium transition-colors"
                   >
-                    {isSaving ? '저장 중...' : `저장 ${makeupDirtyCount > 0 ? `(${makeupDirtyCount})` : ''}`}
+                    전체 저장 후 닫기
                   </button>
-                  
-                  {/* 닫기 버튼 */}
-                  <button
-                    onClick={handleCloseMakeupModal}
-                    className="p-2 text-[#6B7280] hover:text-[#1F2937] hover:bg-[#F3F4F6] rounded-lg transition-colors"
-                  >
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
+                )}
+                <button
+                  onClick={handleCloseMakeupModal}
+                  className="p-2 text-[#6B7280] hover:text-[#1F2937] hover:bg-[#F3F4F6] rounded-lg transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
               </div>
             </div>
-          </div>
-          
-          {/* 컨텐츠 */}
-          <div className="flex-1 overflow-y-auto">
-            <div className="p-4 md:p-6">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            {/* 바디 */}
+            <div className="flex-1 overflow-auto p-6">
+            <div className="grid lg:grid-cols-3 gap-6">
               {/* 왼쪽: 보강 대기 목록 */}
               <div className="lg:col-span-1">
-                <div className="bg-white rounded-xl shadow-sm border border-[#E5E7EB] overflow-hidden">
-                  <div className="px-4 py-3 border-b border-[#E5E7EB] bg-[#F9FAFB]">
-                    <h2 className="font-semibold text-[#1F2937]">보강 대기 학생</h2>
-                  </div>
+                <div className="bg-[#F9FAFB] rounded-xl p-4 sticky top-0">
+                  <h3 className="font-semibold text-[#1F2937] mb-3">보강 대기 학생</h3>
                   
                   {/* 검색 */}
-                  <div className="p-3 border-b border-[#E5E7EB]">
-                    <input
-                      type="text"
-                      placeholder="학생 이름 검색..."
-                      value={makeupSearchQuery}
-                      onChange={(e) => setMakeupSearchQuery(e.target.value)}
-                      className="w-full px-3 py-2 border border-[#E5E7EB] rounded-lg text-sm text-[#1F2937] placeholder-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/30"
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    value={makeupSearchQuery}
+                    onChange={(e) => setMakeupSearchQuery(e.target.value)}
+                    placeholder="학생 검색..."
+                    className="w-full px-3 py-2 border border-[#E5E7EB] rounded-lg text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/30"
+                  />
                   
                   {/* 목록 */}
-                  <div className="max-h-[400px] overflow-y-auto">
+                  <div className="space-y-2 max-h-[60vh] overflow-auto">
                     {isLoadingMakeupTickets ? (
-                      <div className="flex items-center justify-center py-10">
-                        <div className="animate-spin rounded-full h-6 w-6 border-2 border-[#7C3AED] border-t-transparent" />
+                      <div className="text-center py-8 text-[#9CA3AF]">
+                        <div className="animate-spin rounded-full h-6 w-6 border-2 border-[#7C3AED] border-t-transparent mx-auto mb-2" />
+                        불러오는 중...
                       </div>
                     ) : pendingMakeupTickets.length === 0 ? (
-                      <div className="text-center py-10 text-[#9CA3AF]">
-                        {makeupSearchQuery ? '검색 결과가 없습니다' : '보강 대기 학생이 없습니다'}
+                      <div className="text-center py-8 text-[#9CA3AF]">
+                        보강 대기 학생이 없습니다
                       </div>
                     ) : (
-                      <ul className="divide-y divide-[#F3F4F6]">
-                        {pendingMakeupTickets.map(ticket => {
+                      pendingMakeupTickets
+                        .filter(ticket => 
+                          !makeupSearchQuery || 
+                          ticket.student_name.includes(makeupSearchQuery) ||
+                          ticket.class_name.includes(makeupSearchQuery)
+                        )
+                        .map(ticket => {
                           const isAdded = addedTicketIds.includes(ticket.id);
                           return (
-                            <li key={ticket.id}>
-                              <button
-                                onClick={() => !isAdded && handleAddMakeupStudent(ticket)}
-                                disabled={isAdded}
-                                className={`
-                                  w-full px-4 py-3 text-left transition-colors
-                                  ${isAdded 
-                                    ? 'bg-[#F3F4F6] cursor-not-allowed' 
-                                    : 'hover:bg-[#FAF5FF]'
-                                  }
-                                `}
-                              >
-                                <div className="flex items-center justify-between">
-                                  <div>
-                                    <span className={`font-medium ${isAdded ? 'text-[#9CA3AF]' : 'text-[#1F2937]'}`}>
-                                      {ticket.studentName}
-                                    </span>
-                                    <span className="text-[#9CA3AF] text-sm ml-2">
-                                      ({ticket.className} · {ticket.displayCode})
-                                    </span>
-                                  </div>
-                                  <div className="text-right">
-                                    {isAdded ? (
-                                      <span className="text-xs text-[#7C3AED] font-medium">추가됨</span>
-                                    ) : (
-                                      <>
-                                        <span className="text-sm text-[#6B7280]">{formatAbsenceDate(ticket.absenceDate)}</span>
-                                        <span className="text-xs text-[#9CA3AF] ml-2">{ticket.absenceReason || '-'}</span>
-                                      </>
-                                    )}
-                                  </div>
-                                </div>
-                              </button>
-                            </li>
+                            <button
+                              key={ticket.id}
+                              onClick={() => !isAdded && handleAddMakeupStudent(ticket)}
+                              disabled={isAdded}
+                              className={`
+                                w-full text-left p-3 rounded-lg transition-all
+                                ${isAdded 
+                                  ? 'bg-[#7C3AED]/10 border-2 border-[#7C3AED] cursor-default'
+                                  : 'bg-white border border-[#E5E7EB] hover:border-[#7C3AED] hover:shadow-sm'
+                                }
+                              `}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-medium text-[#1F2937]">{ticket.student_name}</span>
+                                {isAdded ? (
+                                  <span className="text-xs text-[#7C3AED]">추가됨</span>
+                                ) : (
+                                  <span className="text-xs text-[#6B7280]">{ticket.class_name}</span>
+                                )}
+                              </div>
+                              <div className="text-xs text-[#9CA3AF] mt-1">
+                                {formatAbsenceDate(ticket.absence_date)} 결석 · {ticket.absence_reason}
+                              </div>
+                            </button>
                           );
-                        })}
-                      </ul>
+                        })
                     )}
                   </div>
                 </div>
@@ -637,7 +586,6 @@ export default function FeedInputClient({
             </div>
             </div>
           </div>
-          </div>
         </>
       )}
       
@@ -668,6 +616,7 @@ export default function FeedInputClient({
                     key={student.id}
                     data={cardData}
                     optionSets={optionSets}
+                    examTypes={examTypes}  // 🆕 추가
                     tenantSettings={tenantSettings}
                     memoFields={memoFields}
                     onOpenOptionPicker={openOptionPicker}
@@ -676,6 +625,7 @@ export default function FeedInputClient({
                     onNeedsMakeupChange={handleNeedsMakeupChange}
                     onProgressChange={handleProgressChange}
                     onMemoChange={handleMemoChange}
+                    onExamScoreChange={handleExamScoreChange}  // 🆕 추가
                     onSave={handleSave}
                     isSaving={savingStudentId === student.id}
                   />
@@ -699,8 +649,8 @@ export default function FeedInputClient({
       
       {/* Dirty 상태 경고 (보강 모달 열려있을 땐 숨김) */}
       {hasDirtyCards && !makeupPanelOpen && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-20">
-          <div className="bg-[#F59E0B] text-white px-5 py-2.5 rounded-full shadow-lg text-sm font-medium flex items-center gap-2">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50">
+          <div className="bg-[#F59E0B] text-white px-4 py-3 rounded-lg shadow-xl text-sm font-medium flex items-center gap-3 border border-[#D97706]">
             <div className="w-2 h-2 rounded-full bg-white animate-pulse" />
             <span>저장하지 않은 변경사항이 있습니다</span>
           </div>
