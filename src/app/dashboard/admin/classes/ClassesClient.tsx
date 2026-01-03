@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Plus, School, Loader2 } from 'lucide-react';
 
 import { useClasses } from './hooks/useClasses';
@@ -21,6 +21,8 @@ export default function ClassesClient() {
     classMembers,
     availableTeachers,
     availableStudents,
+    teacherCounts,
+    studentCounts,
     handleCreateClass,
     handleUpdateClass,
     handleDeleteClass,
@@ -37,24 +39,6 @@ export default function ClassesClient() {
   const [editingClass, setEditingClass] = useState<Class | null>(null);
   const [deletingClass, setDeletingClass] = useState<Class | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-
-  // 교사/학생 카운트 (selectedClass 변경 시 업데이트됨)
-  const [teacherCounts, setTeacherCounts] = useState<Record<string, number>>({});
-  const [studentCounts, setStudentCounts] = useState<Record<string, number>>({});
-
-  // selectedClass 변경 시 카운트 업데이트
-  useEffect(() => {
-    if (selectedClass) {
-      setTeacherCounts((prev) => ({
-        ...prev,
-        [selectedClass.id]: classTeachers.length,
-      }));
-      setStudentCounts((prev) => ({
-        ...prev,
-        [selectedClass.id]: classMembers.length,
-      }));
-    }
-  }, [selectedClass, classTeachers.length, classMembers.length]);
 
   // ============ Handlers ============
   const handleCreate = async (data: ClassFormData) => {

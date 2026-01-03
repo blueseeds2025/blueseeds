@@ -84,7 +84,7 @@ export async function getTeacherClasses(): Promise<{
 }
 
 // ============================================================================
-// 반에 속한 학생 목록 조회
+// 반에 속한 학생 목록 조회 (enrollments 기준)
 // ============================================================================
 
 export async function getClassStudents(classId: string): Promise<{
@@ -111,8 +111,9 @@ export async function getClassStudents(classId: string): Promise<{
       return { success: false, error: '프로필을 찾을 수 없습니다' };
     }
     
+    // 🆕 class_members → enrollments 변경
     const { data, error } = await supabase
-      .from('class_members')
+      .from('enrollments')
       .select(`
         student_id,
         students (
@@ -123,7 +124,7 @@ export async function getClassStudents(classId: string): Promise<{
       `)
       .eq('tenant_id', profile.tenant_id)
       .eq('class_id', classId)
-      .eq('is_active', true)
+      .is('end_date', null)  // 현재 활성 소속
       .is('deleted_at', null);
     
     if (error) throw error;

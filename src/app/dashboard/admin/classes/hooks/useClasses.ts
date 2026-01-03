@@ -19,6 +19,7 @@ import {
   enrollStudentsBulk,
   getAvailableTeachers,
   getAvailableStudents,
+  getClassCounts,
 } from '../actions/class.actions';
 
 export function useClasses() {
@@ -26,6 +27,10 @@ export function useClasses() {
   const [classes, setClasses] = useState<Class[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedClass, setSelectedClass] = useState<Class | null>(null);
+  
+  // 모든 반의 교사/학생 카운트
+  const [teacherCounts, setTeacherCounts] = useState<Record<string, number>>({});
+  const [studentCounts, setStudentCounts] = useState<Record<string, number>>({});
   
   // 선택된 반의 교사/학생
   const [classTeachers, setClassTeachers] = useState<ClassTeacher[]>([]);
@@ -39,8 +44,14 @@ export function useClasses() {
   const loadClasses = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await listClasses();
+      // 반 목록과 카운트를 병렬로 로드
+      const [data, counts] = await Promise.all([
+        listClasses(),
+        getClassCounts(),
+      ]);
       setClasses(data);
+      setTeacherCounts(counts.teacherCounts);
+      setStudentCounts(counts.studentCounts);
     } catch (error) {
       console.error('[useClasses] loadClasses error:', error);
       toast.error(TOAST_MESSAGES.loadFailed);
@@ -120,6 +131,10 @@ export function useClasses() {
       setClassMembers(members);
       setAvailableTeachers(availTeachers);
       setAvailableStudents(availStudents);
+      
+      // 카운트도 업데이트
+      setTeacherCounts(prev => ({ ...prev, [cls.id]: teachers.length }));
+      setStudentCounts(prev => ({ ...prev, [cls.id]: members.length }));
     } catch (error) {
       console.error('[useClasses] selectClass error:', error);
       toast.error(TOAST_MESSAGES.loadFailed);
@@ -213,6 +228,8 @@ export function useClasses() {
     classMembers,
     availableTeachers,
     availableStudents,
+    teacherCounts,
+    studentCounts,
 
     // 반 CRUD
     loadClasses,

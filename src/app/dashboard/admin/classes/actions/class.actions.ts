@@ -58,7 +58,7 @@ async function getTenantIdOrThrow(sb: Awaited<ReturnType<typeof supabaseServer>>
 // Class CRUD
 // =======================
 
-/** 반 목록 조회 */
+/** 반 목록 조회 (교사/학생 카운트 포함) */
 export async function listClasses(): Promise<Class[]> {
   const sb = await supabaseServer();
   const { tenantId } = await getTenantIdOrThrow(sb);
@@ -76,6 +76,47 @@ export async function listClasses(): Promise<Class[]> {
   }
 
   return (data ?? []) as Class[];
+}
+
+/** 모든 반의 교사/학생 카운트 조회 */
+export async function getClassCounts(): Promise<{
+  teacherCounts: Record<string, number>;
+  studentCounts: Record<string, number>;
+}> {
+  const sb = await supabaseServer();
+  const { tenantId } = await getTenantIdOrThrow(sb);
+
+  // 교사 카운트 (class_teachers 기반)
+  const { data: teacherData } = await sb
+    .from('class_teachers')
+    .select('class_id')
+    .eq('tenant_id', tenantId)
+    .eq('is_active', true)
+    .is('deleted_at', null);
+
+  const teacherCounts: Record<string, number> = {};
+  for (const t of teacherData ?? []) {
+    if (t.class_id) {
+      teacherCounts[t.class_id] = (teacherCounts[t.class_id] || 0) + 1;
+    }
+  }
+
+  // 학생 카운트 (class_members 기반)
+  const { data: studentData } = await sb
+    .from('class_members')
+    .select('class_id')
+    .eq('tenant_id', tenantId)
+    .eq('is_active', true)
+    .is('deleted_at', null);
+
+  const studentCounts: Record<string, number> = {};
+  for (const s of studentData ?? []) {
+    if (s.class_id) {
+      studentCounts[s.class_id] = (studentCounts[s.class_id] || 0) + 1;
+    }
+  }
+
+  return { teacherCounts, studentCounts };
 }
 
 /** 반 생성 */

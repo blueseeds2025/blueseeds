@@ -70,7 +70,7 @@ export async function listTeachers(): Promise<Teacher[]> {
 
   const { data, error } = await sb
     .from('profiles')
-    .select('id, tenant_id, name, display_name, color, role, created_at, updated_at')
+    .select('id, tenant_id, name, display_name, calendar_color, role, created_at, updated_at')
     .eq('tenant_id', tenantId)
     .eq('role', 'teacher')
     .is('deleted_at', null)
@@ -81,7 +81,11 @@ export async function listTeachers(): Promise<Teacher[]> {
     throw error;
   }
 
-  return (data ?? []) as Teacher[];
+  // calendar_color를 color로 매핑
+  return (data ?? []).map((t: any) => ({
+    ...t,
+    color: t.calendar_color || '#6366F1',
+  })) as Teacher[];
 }
 
 /** 교사 상세 정보 조회 (담당 반 + 피드 권한) */
@@ -97,7 +101,7 @@ export async function getTeacherDetails(teacherId: string): Promise<TeacherWithD
   // 1. 교사 기본 정보 (필요한 컬럼만)
   const { data: teacher, error: teacherErr } = await sb
     .from('profiles')
-    .select('id, tenant_id, name, display_name, color, role, created_at, updated_at')
+    .select('id, tenant_id, name, display_name, calendar_color, role, created_at, updated_at')
     .eq('id', teacherId)
     .eq('tenant_id', tenantId)
     .eq('role', 'teacher')
@@ -196,11 +200,12 @@ permissionMap.set(p.option_set_id, { id: p.id, is_allowed: p.is_allowed ?? true 
   });
 
   return {
-    ...(teacher as Teacher),
+    ...teacher,
+    color: (teacher as any).calendar_color || '#6366F1',
     assignedClasses,
     permissions,
     feedPermissions,
-  };
+  } as TeacherWithDetails;
 }
 
 // =======================
@@ -219,7 +224,7 @@ export async function updateTeacherColor(teacherId: string, color: string): Prom
 
     const { error } = await sb
       .from('profiles')
-      .update({ color, updated_at: new Date().toISOString() })
+      .update({ calendar_color: color, updated_at: new Date().toISOString() })
       .eq('id', teacherId)
       .eq('tenant_id', tenantId);
 
@@ -229,6 +234,7 @@ export async function updateTeacherColor(teacherId: string, color: string): Prom
     }
 
     revalidatePath('/dashboard/admin/teachers');
+    revalidatePath('/dashboard/timetable');
     return { ok: true };
   } catch (e: any) {
     console.error('[updateTeacherColor] fatal:', e);
