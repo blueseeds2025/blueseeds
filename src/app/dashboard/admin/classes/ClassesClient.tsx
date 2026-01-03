@@ -19,10 +19,12 @@ export default function ClassesClient() {
     selectedClass,
     classTeachers,
     classMembers,
+    classSchedules,
     availableTeachers,
     availableStudents,
     teacherCounts,
     studentCounts,
+    schedulesMap,
     handleCreateClass,
     handleUpdateClass,
     handleDeleteClass,
@@ -32,6 +34,10 @@ export default function ClassesClient() {
     handleEnrollStudent,
     handleUnenrollStudent,
     handleEnrollStudentsBulk,
+    handleAddSchedule,
+    handleAddSchedulesBulk,
+    handleRemoveSchedule,
+    handleChangeColor,
   } = useClasses();
 
   // ============ Local State ============
@@ -130,9 +136,8 @@ export default function ClassesClient() {
                     isSelected={selectedClass?.id === cls.id}
                     teacherCount={teacherCounts[cls.id] ?? 0}
                     studentCount={studentCounts[cls.id] ?? 0}
+                    schedules={schedulesMap[cls.id] ?? []}
                     onSelect={() => selectClass(selectedClass?.id === cls.id ? null : cls)}
-                    onEdit={() => setEditingClass(cls)}
-                    onDelete={() => setDeletingClass(cls)}
                   />
                 ))}
               </div>
@@ -146,6 +151,7 @@ export default function ClassesClient() {
                 cls={selectedClass}
                 teachers={classTeachers}
                 members={classMembers}
+                schedules={classSchedules}
                 availableTeachers={availableTeachers}
                 availableStudents={availableStudents}
                 onClose={() => selectClass(null)}
@@ -154,6 +160,10 @@ export default function ClassesClient() {
                 onEnrollStudent={handleEnrollStudent}
                 onUnenrollStudent={handleUnenrollStudent}
                 onEnrollStudentsBulk={handleEnrollStudentsBulk}
+                onAddSchedulesBulk={handleAddSchedulesBulk}
+                onRemoveSchedule={handleRemoveSchedule}
+                onDeleteClass={() => setDeletingClass(selectedClass)}
+                onChangeColor={handleChangeColor}
               />
             </div>
           )}

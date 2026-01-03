@@ -2,20 +2,18 @@
 // 반 관리 상수
 // ============================================================================
 
-/** 반 색상 팔레트 (시간표/UI 표시용) */
+/** 반 색상 팔레트 (시간표용 - 선명한 원색) */
 export const CLASS_COLORS = [
+  { value: '#EF4444', label: '빨강' },
+  { value: '#F97316', label: '주황' },
+  { value: '#84CC16', label: '연두' },
+  { value: '#16A34A', label: '초록' },
+  { value: '#06B6D4', label: '하늘' },
   { value: '#6366F1', label: '인디고' },
-  { value: '#8B5CF6', label: '바이올렛' },
-  { value: '#EC4899', label: '핑크' },
-  { value: '#EF4444', label: '레드' },
-  { value: '#F97316', label: '오렌지' },
-  { value: '#EAB308', label: '옐로우' },
-  { value: '#22C55E', label: '그린' },
-  { value: '#14B8A6', label: '틸' },
-  { value: '#06B6D4', label: '시안' },
-  { value: '#3B82F6', label: '블루' },
-  { value: '#6B7280', label: '그레이' },
-  { value: '#78716C', label: '스톤' },
+  { value: '#1E40AF', label: '남색' },
+  { value: '#8B5CF6', label: '보라' },
+  { value: '#EC4899', label: '분홍' },
+  { value: '#374151', label: '검정' },
 ] as const;
 
 /** 기본 반 색상 */

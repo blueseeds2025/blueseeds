@@ -84,10 +84,10 @@ export async function getTeacherClasses(): Promise<{
 }
 
 // ============================================================================
-// 반에 속한 학생 목록 조회 (enrollments 기준)
+// 반에 속한 학생 목록 조회 (선택한 날짜 요일 기준 - enrollment_schedule_assignments)
 // ============================================================================
 
-export async function getClassStudents(classId: string): Promise<{
+export async function getClassStudents(classId: string, feedDate?: string): Promise<{
   success: boolean;
   data?: ClassStudent[];
   error?: string;
@@ -111,9 +111,32 @@ export async function getClassStudents(classId: string): Promise<{
       return { success: false, error: '프로필을 찾을 수 없습니다' };
     }
     
-    // 🆕 class_members → enrollments 변경
+    // feedDate가 있으면 그 날짜의 요일, 없으면 오늘
+    const targetDate = feedDate ? new Date(feedDate + 'T00:00:00') : new Date();
+    const dayOfWeek = targetDate.getDay();
+    
+    // 1. 해당 반의 해당 요일 스케줄 조회
+    const { data: schedules, error: scheduleError } = await supabase
+      .from('class_schedules')
+      .select('id')
+      .eq('tenant_id', profile.tenant_id)
+      .eq('class_id', classId)
+      .eq('day_of_week', dayOfWeek)
+      .eq('is_active', true)
+      .is('deleted_at', null);
+    
+    if (scheduleError) throw scheduleError;
+    
+    // 오늘 해당 반 스케줄이 없으면 빈 배열
+    if (!schedules || schedules.length === 0) {
+      return { success: true, data: [] };
+    }
+    
+    const scheduleIds = schedules.map(s => s.id);
+    
+    // 2. 해당 스케줄에 배정된 학생 조회
     const { data, error } = await supabase
-      .from('enrollments')
+      .from('enrollment_schedule_assignments')
       .select(`
         student_id,
         students (
@@ -123,8 +146,8 @@ export async function getClassStudents(classId: string): Promise<{
         )
       `)
       .eq('tenant_id', profile.tenant_id)
-      .eq('class_id', classId)
-      .is('end_date', null)  // 현재 활성 소속
+      .in('class_schedule_id', scheduleIds)
+      .is('end_date', null)
       .is('deleted_at', null);
     
     if (error) throw error;

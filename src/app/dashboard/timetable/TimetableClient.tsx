@@ -1,15 +1,17 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { X, Plus, Users, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useState, useEffect, DragEvent } from 'react';
+import { X, Plus, Users, Clock } from 'lucide-react';
 import { 
   getScheduleBlocks, 
-  getClassStudentsForBlock,
   createSchedule,
   deleteSchedule,
   getClassesForSchedule,
+  moveStudentThisDay,
+  moveStudentWholeGroup,
   ScheduleBlock,
-  Teacher 
+  Teacher,
+  Student
 } from './timetable.actions';
 import { toast } from 'sonner';
 
@@ -27,19 +29,22 @@ const DAYS = [
   { value: 6, label: '토' },
 ];
 
-const DEFAULT_START_HOUR = 9;   // 기본 시작 시간 (오전 9시)
-const DEFAULT_END_HOUR = 23;    // 기본 종료 시간 (오후 11시)
-const MIN_HOUR = 6;             // 최소 시작 가능 (오전 6시)
-const MAX_HOUR = 24;            // 최대 종료 가능 (자정)
-const SLOT_HEIGHT = 48;         // 30분당 픽셀
+const DAY_NAMES: Record<number, string> = {
+  0: '일', 1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토'
+};
 
-// 시간 선택 옵션 (30분 단위)
+const DEFAULT_START_HOUR = 9;
+const DEFAULT_END_HOUR = 23;
+const MIN_HOUR = 6;
+const MAX_HOUR = 24;
+const SLOT_HEIGHT = 48;
+
 const TIME_OPTIONS: string[] = [];
 for (let h = 6; h <= 23; h++) {
   TIME_OPTIONS.push(`${h.toString().padStart(2, '0')}:00`);
   TIME_OPTIONS.push(`${h.toString().padStart(2, '0')}:30`);
 }
-TIME_OPTIONS.push('24:00'); // 자정
+TIME_OPTIONS.push('24:00');
 
 // ============================================================================
 // 유틸 함수
@@ -62,6 +67,15 @@ function getBlockStyle(startTime: string, endTime: string, startHour: number): R
 }
 
 // ============================================================================
+// 드래그 데이터 타입
+// ============================================================================
+
+interface DragData {
+  student: Student;
+  fromBlock: ScheduleBlock;
+}
+
+// ============================================================================
 // 메인 컴포넌트
 // ============================================================================
 
@@ -72,21 +86,25 @@ export default function TimetableClient() {
   const [loading, setLoading] = useState(true);
   const [selectedTeachers, setSelectedTeachers] = useState<Set<string>>(new Set());
   
-  // 시간 범위 상태 (동적 조절)
   const [startHour, setStartHour] = useState(DEFAULT_START_HOUR);
   const [endHour, setEndHour] = useState(DEFAULT_END_HOUR);
   
-  // 모달 상태
-  const [studentModal, setStudentModal] = useState<{
-    open: boolean;
-    className: string;
-    students: { id: string; name: string; displayCode: string }[];
-  }>({ open: false, className: '', students: [] });
+  // 드래그 상태
+  const [dragData, setDragData] = useState<DragData | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
   
+  // 변경 확인 모달
+  const [moveModal, setMoveModal] = useState<{
+    open: boolean;
+    student: Student | null;
+    fromBlock: ScheduleBlock | null;
+    toBlock: ScheduleBlock | null;
+  }>({ open: false, student: null, fromBlock: null, toBlock: null });
+  const [isMoving, setIsMoving] = useState(false);
+  
+  // 스케줄 추가 모달
   const [addModal, setAddModal] = useState(false);
   const [classes, setClasses] = useState<{ id: string; name: string; teacherName: string }[]>([]);
-  
-  // 폼 상태
   const [formData, setFormData] = useState({
     classId: '',
     dayOfWeek: 1,
@@ -110,7 +128,6 @@ export default function TimetableClient() {
       setBlocks(result.data.blocks);
       setTeachers(result.data.teachers);
       setUserRole(result.data.userRole);
-      // 기본: 모든 선생님 선택
       setSelectedTeachers(new Set(result.data.teachers.map(t => t.id)));
     } else {
       toast.error(result.error || '시간표를 불러오지 못했습니다');
@@ -120,25 +137,113 @@ export default function TimetableClient() {
   }
 
   // ============================================================================
-  // 블록 클릭 - 학생 명단 보기
+  // 드래그 앤 드롭 핸들러
   // ============================================================================
 
-  async function handleBlockClick(block: ScheduleBlock) {
-    const result = await getClassStudentsForBlock(block.classId);
+  function handleDragStart(e: DragEvent, student: Student, block: ScheduleBlock) {
+    setDragData({ student, fromBlock: block });
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', student.id);
+  }
+
+  function handleDragEnd() {
+    setDragData(null);
+    setDropTarget(null);
+  }
+
+  function handleDragOver(e: DragEvent, blockId: string) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDropTarget(blockId);
+  }
+
+  function handleDragLeave() {
+    setDropTarget(null);
+  }
+
+  function handleDrop(e: DragEvent, toBlock: ScheduleBlock) {
+    e.preventDefault();
+    setDropTarget(null);
     
-    if (result.success && result.data) {
-      setStudentModal({
-        open: true,
-        className: result.data.className,
-        students: result.data.students,
-      });
-    } else {
-      toast.error(result.error || '학생 목록을 불러오지 못했습니다');
+    if (!dragData) return;
+    
+    // 같은 블록에 드롭하면 무시
+    if (dragData.fromBlock.id === toBlock.id) {
+      setDragData(null);
+      return;
     }
+    
+    // 확인 모달 열기
+    setMoveModal({
+      open: true,
+      student: dragData.student,
+      fromBlock: dragData.fromBlock,
+      toBlock: toBlock,
+    });
+    
+    setDragData(null);
   }
 
   // ============================================================================
-  // 스케줄 추가
+  // 변경 실행
+  // ============================================================================
+
+  async function handleMoveThisDay() {
+    if (!moveModal.student || !moveModal.toBlock) return;
+    
+    setIsMoving(true);
+    
+    const result = await moveStudentThisDay(
+      moveModal.student.assignmentId,
+      moveModal.toBlock.id
+    );
+    
+    if (result.success) {
+      toast.success(
+        `${moveModal.student.name}: ${DAY_NAMES[moveModal.fromBlock!.dayOfWeek]}요일 ${moveModal.fromBlock!.startTime} → ${moveModal.toBlock.startTime} 변경 완료`
+      );
+      setMoveModal({ open: false, student: null, fromBlock: null, toBlock: null });
+      loadSchedule();
+    } else {
+      toast.error(result.error || '변경에 실패했습니다');
+    }
+    
+    setIsMoving(false);
+  }
+
+  async function handleMoveWholeGroup() {
+    if (!moveModal.student || !moveModal.toBlock) return;
+    
+    setIsMoving(true);
+    
+    const result = await moveStudentWholeGroup(
+      moveModal.student.assignmentId,
+      moveModal.toBlock.id
+    );
+    
+    if (result.success) {
+      const movedDayNames = (result.movedDays || []).map(d => DAY_NAMES[d]).join(', ');
+      const skippedDayNames = (result.skippedDays || []).map(d => DAY_NAMES[d]).join(', ');
+      
+      if (result.skippedDays && result.skippedDays.length > 0) {
+        toast.success(
+          `${moveModal.student.name}: ${movedDayNames} 변경 완료 (${skippedDayNames}은 슬롯 없어서 유지)`
+        );
+      } else {
+        toast.success(`${moveModal.student.name}: ${movedDayNames} 전체 변경 완료`);
+      }
+      
+      setMoveModal({ open: false, student: null, fromBlock: null, toBlock: null });
+      loadSchedule();
+    } else {
+      toast.error(result.error || '변경에 실패했습니다');
+    }
+    
+    setIsMoving(false);
+  }
+
+  // ============================================================================
+  // 스케줄 추가/삭제
   // ============================================================================
 
   async function openAddModal() {
@@ -170,10 +275,6 @@ export default function TimetableClient() {
       toast.error(result.error || '스케줄 추가에 실패했습니다');
     }
   }
-
-  // ============================================================================
-  // 스케줄 삭제
-  // ============================================================================
 
   async function handleDeleteSchedule(scheduleId: string, e: React.MouseEvent) {
     e.stopPropagation();
@@ -210,11 +311,10 @@ export default function TimetableClient() {
     setSelectedTeachers(new Set(teachers.map(t => t.id)));
   }
 
-  // 필터링된 블록
   const filteredBlocks = blocks.filter(b => selectedTeachers.has(b.teacherId));
 
   // ============================================================================
-  // 시간 슬롯 생성 (동적)
+  // 시간 슬롯
   // ============================================================================
 
   const timeSlots: string[] = [];
@@ -285,7 +385,6 @@ export default function TimetableClient() {
       {/* 시간 범위 조절 */}
       <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-[#E5E7EB]">
         <div className="flex items-center gap-4">
-          {/* 시작 시간 */}
           <div className="flex items-center gap-2">
             <span className="text-sm text-[#6B7280]">시작:</span>
             <button
@@ -309,7 +408,6 @@ export default function TimetableClient() {
           
           <span className="text-[#D1D5DB]">~</span>
           
-          {/* 종료 시간 */}
           <div className="flex items-center gap-2">
             <span className="text-sm text-[#6B7280]">종료:</span>
             <button
@@ -332,7 +430,6 @@ export default function TimetableClient() {
           </div>
         </div>
         
-        {/* 리셋 버튼 */}
         <button
           onClick={() => {
             setStartHour(DEFAULT_START_HOUR);
@@ -349,7 +446,7 @@ export default function TimetableClient() {
         <div className="overflow-x-auto">
           <div className="min-w-[800px]">
             {/* 요일 헤더 */}
-            <div className="grid grid-cols-[60px_repeat(7,1fr)] border-b border-[#E5E7EB]">
+            <div className="grid grid-cols-[80px_repeat(7,1fr)] border-b border-[#E5E7EB]">
               <div className="p-2 text-center text-xs text-[#9CA3AF] bg-[#F9FAFB]" />
               {DAYS.map(day => (
                 <div
@@ -362,17 +459,18 @@ export default function TimetableClient() {
             </div>
 
             {/* 시간 그리드 */}
-            <div className="grid grid-cols-[60px_repeat(7,1fr)]">
+            <div className="grid grid-cols-[80px_repeat(7,1fr)]">
               {/* 시간 레이블 */}
               <div className="relative">
                 {timeSlots.map((time, i) => (
                   <div
                     key={time}
-                    className="h-[60px] border-b border-[#F3F4F6] flex items-start justify-center pt-1"
+                    className={`h-[48px] flex items-start justify-end pr-3 pt-1
+                      ${i % 2 === 0 ? 'border-b border-[#D1D5DB]' : 'border-b border-[#F3F4F6]'}`}
                   >
-                    {i % 2 === 0 && (
-                      <span className="text-xs text-[#9CA3AF]">{time}</span>
-                    )}
+                    <span className={`${i % 2 === 0 ? 'text-base text-[#374151] font-semibold' : 'text-sm text-[#9CA3AF]'}`}>
+                      {time}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -391,7 +489,7 @@ export default function TimetableClient() {
                     {timeSlots.map((_, i) => (
                       <div
                         key={i}
-                        className="absolute w-full border-b border-[#F3F4F6]"
+                        className={`absolute w-full border-b ${i % 2 === 1 ? 'border-[#D1D5DB]' : 'border-[#F3F4F6]'}`}
                         style={{ top: `${(i + 1) * SLOT_HEIGHT}px` }}
                       />
                     ))}
@@ -400,38 +498,59 @@ export default function TimetableClient() {
                     {dayBlocks.map(block => (
                       <div
                         key={block.id}
-                        onClick={() => handleBlockClick(block)}
+                        onDragOver={(e) => handleDragOver(e, block.id)}
+                        onDragLeave={handleDragLeave}
+                        onDrop={(e) => handleDrop(e, block)}
                         style={{
                           ...getBlockStyle(block.startTime, block.endTime, startHour),
                           borderLeftColor: block.teacherColor,
                         }}
-                        className="absolute left-1 right-1 rounded-lg p-2 cursor-pointer 
-                                   bg-white border border-[#E5E7EB] border-l-4 shadow-sm
-                                   hover:shadow-md hover:border-[#D1D5DB] transition-shadow"
+                        className={`absolute left-1 right-1 rounded-lg p-2
+                                   bg-white border border-l-4 shadow-sm
+                                   overflow-hidden transition-all
+                                   ${dropTarget === block.id 
+                                     ? 'border-[#6366F1] bg-[#EEF2FF] shadow-md' 
+                                     : 'border-[#E5E7EB]'
+                                   }`}
                       >
-                        <div className="flex items-start justify-between">
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium text-[#111827] truncate">
-                              {block.className}
-                            </p>
-                            <p className="text-xs text-[#6B7280] mt-0.5">
-                              {block.startTime} - {block.endTime}
-                            </p>
-                            <div className="flex items-center gap-1 mt-1 text-xs text-[#9CA3AF]">
-                              <Users className="w-3 h-3" />
-                              <span>{block.studentCount}명</span>
-                            </div>
-                          </div>
-                          
+                        {/* 반 이름 + 삭제 버튼 */}
+                        <div className="flex items-start justify-between mb-1">
+                          <p className="text-sm font-medium text-[#111827] truncate">
+                            {block.className}
+                          </p>
                           {userRole === 'owner' && (
                             <button
                               onClick={(e) => handleDeleteSchedule(block.id, e)}
-                              className="p-1 rounded hover:bg-[#FEE2E2] text-[#9CA3AF] hover:text-[#DC2626] transition-colors"
+                              className="p-0.5 rounded hover:bg-[#FEE2E2] text-[#9CA3AF] hover:text-[#DC2626] transition-colors"
                             >
                               <X className="w-3 h-3" />
                             </button>
                           )}
                         </div>
+                        
+                        {/* 학생 목록 (드래그 가능) */}
+                        {block.students.length === 0 ? (
+                          <p className="text-xs text-[#9CA3AF]">학생 없음</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {block.students.map(student => (
+                              <span
+                                key={student.id}
+                                draggable
+                                onDragStart={(e) => handleDragStart(e, student, block)}
+                                onDragEnd={handleDragEnd}
+                                className={`text-xs px-1.5 py-0.5 rounded cursor-grab active:cursor-grabbing
+                                           transition-colors select-none
+                                           ${dragData?.student.id === student.id
+                                             ? 'bg-[#6366F1] text-white'
+                                             : 'bg-[#F3F4F6] text-[#374151] hover:bg-[#E5E7EB]'
+                                           }`}
+                              >
+                                {student.name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -458,55 +577,74 @@ export default function TimetableClient() {
         </div>
       )}
 
-      {/* 학생 명단 모달 */}
-      {studentModal.open && (
+      {/* 변경 확인 모달 */}
+      {moveModal.open && moveModal.student && moveModal.fromBlock && moveModal.toBlock && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-xl w-full max-w-md mx-4 shadow-2xl">
+          <div className="bg-white rounded-xl w-full max-w-sm mx-4 shadow-2xl">
             <div className="flex items-center justify-between p-4 border-b border-[#E5E7EB]">
               <h2 className="text-lg font-semibold text-[#111827]">
-                {studentModal.className} 학생 명단
+                학생 변경
               </h2>
               <button
-                onClick={() => setStudentModal({ open: false, className: '', students: [] })}
+                onClick={() => setMoveModal({ open: false, student: null, fromBlock: null, toBlock: null })}
                 className="p-2 rounded-lg hover:bg-[#F3F4F6]"
               >
                 <X className="w-5 h-5 text-[#6B7280]" />
               </button>
             </div>
             
-            <div className="p-4 max-h-80 overflow-y-auto">
-              {studentModal.students.length === 0 ? (
-                <p className="text-center text-[#9CA3AF] py-8">
-                  등록된 학생이 없습니다
+            <div className="p-4 space-y-4">
+              {/* 변경 정보 */}
+              <div className="bg-[#F9FAFB] rounded-lg p-4 space-y-2">
+                <p className="text-sm font-medium text-[#111827]">
+                  {moveModal.student.name}
                 </p>
-              ) : (
-                <ul className="space-y-2">
-                  {studentModal.students.map((student, i) => (
-                    <li
-                      key={student.id}
-                      className="flex items-center gap-3 p-3 rounded-lg bg-[#F9FAFB]"
-                    >
-                      <span className="w-6 h-6 rounded-full bg-[#6366F1] text-white text-xs flex items-center justify-center">
-                        {i + 1}
-                      </span>
-                      <span className="text-sm text-[#374151]">
-                        {student.name}
-                        {student.displayCode && (
-                          <span className="text-[#9CA3AF] ml-1">
-                            ({student.displayCode})
-                          </span>
-                        )}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                <div className="flex items-center gap-2 text-sm text-[#6B7280]">
+                  <span>{moveModal.fromBlock.className}</span>
+                  <span>→</span>
+                  <span className="text-[#6366F1] font-medium">{moveModal.toBlock.className}</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-[#9CA3AF]">
+                  <span>{DAY_NAMES[moveModal.fromBlock.dayOfWeek]} {moveModal.fromBlock.startTime}</span>
+                  <span>→</span>
+                  <span>{DAY_NAMES[moveModal.toBlock.dayOfWeek]} {moveModal.toBlock.startTime}</span>
+                </div>
+              </div>
+              
+              {/* 그룹 정보 */}
+              {moveModal.student.groupKey && (
+                <p className="text-xs text-[#9CA3AF] text-center">
+                  그룹: {moveModal.student.groupKey}
+                </p>
               )}
             </div>
             
-            <div className="p-4 border-t border-[#E5E7EB]">
-              <p className="text-sm text-[#6B7280] text-center">
-                총 {studentModal.students.length}명
-              </p>
+            <div className="flex flex-col gap-2 p-4 border-t border-[#E5E7EB]">
+              <button
+                onClick={handleMoveThisDay}
+                disabled={isMoving}
+                className="w-full px-4 py-2.5 bg-[#6366F1] text-white rounded-lg hover:bg-[#4F46E5] disabled:opacity-50 font-medium"
+              >
+                {isMoving ? '변경 중...' : `${DAY_NAMES[moveModal.fromBlock.dayOfWeek]}요일만 변경`}
+              </button>
+              
+              {moveModal.student.groupKey && (
+                <button
+                  onClick={handleMoveWholeGroup}
+                  disabled={isMoving}
+                  className="w-full px-4 py-2.5 border border-[#6366F1] text-[#6366F1] rounded-lg hover:bg-[#EEF2FF] disabled:opacity-50 font-medium"
+                >
+                  {isMoving ? '변경 중...' : '모든 요일 변경'}
+                </button>
+              )}
+              
+              <button
+                onClick={() => setMoveModal({ open: false, student: null, fromBlock: null, toBlock: null })}
+                disabled={isMoving}
+                className="w-full px-4 py-2 text-[#6B7280] hover:text-[#374151]"
+              >
+                취소
+              </button>
             </div>
           </div>
         </div>
@@ -529,7 +667,6 @@ export default function TimetableClient() {
             </div>
             
             <div className="p-4 space-y-4">
-              {/* 반 선택 */}
               <div>
                 <label className="block text-sm font-medium text-[#374151] mb-1">
                   반 선택
@@ -547,7 +684,6 @@ export default function TimetableClient() {
                 </select>
               </div>
 
-              {/* 요일 선택 */}
               <div>
                 <label className="block text-sm font-medium text-[#374151] mb-1">
                   요일
@@ -565,7 +701,6 @@ export default function TimetableClient() {
                 </select>
               </div>
 
-              {/* 시간 선택 */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-[#374151] mb-1">

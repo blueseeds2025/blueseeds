@@ -130,7 +130,7 @@ export function useFeedRegular({
       
       try {
         const [studentsResult, feedsResult] = await Promise.all([
-          getClassStudents(classId),
+          getClassStudents(classId, date),
           getSavedFeeds(classId, date),
         ]);
         

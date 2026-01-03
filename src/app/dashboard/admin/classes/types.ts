@@ -13,6 +13,14 @@ export type Class = {
   deleted_at: string | null;
 };
 
+/** 반 스케줄 정보 */
+export type ClassSchedule = {
+  id: string;
+  dayOfWeek: number;  // 0=일, 1=월, ..., 6=토
+  startTime: string;  // "14:00"
+  endTime: string;    // "15:30"
+};
+
 /** 반 생성/수정 폼 데이터 */
 export type ClassFormData = {
   name: string;

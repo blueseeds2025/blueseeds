@@ -6,18 +6,26 @@ import { createClient } from '@/lib/supabase/server';
 // 타입 정의
 // ============================================================================
 
-export interface ScheduleBlock {
+export interface Student {
   id: string;
+  name: string;
+  displayCode: string;
+  assignmentId: string;  // enrollment_schedule_assignments.id
+  groupKey: string | null;
+}
+
+export interface ScheduleBlock {
+  id: string;              // class_schedules.id
   classId: string;
   className: string;
   classColor: string | null;
-  dayOfWeek: number;  // 0=일, 1=월, 2=화, 3=수, 4=목, 5=금, 6=토
-  startTime: string;  // "14:00"
-  endTime: string;    // "15:30"
+  dayOfWeek: number;       // 0=일, 1=월, 2=화, 3=수, 4=목, 5=금, 6=토
+  startTime: string;       // "14:00"
+  endTime: string;         // "15:30"
   teacherId: string;
   teacherName: string;
   teacherColor: string;
-  studentCount: number;
+  students: Student[];
 }
 
 export interface Teacher {
@@ -27,7 +35,7 @@ export interface Teacher {
 }
 
 // ============================================================================
-// 시간표 조회 (원장: 전체 / 선생님: 자기 반만)
+// 시간표 조회 (enrollment_schedule_assignments 기반)
 // ============================================================================
 
 export async function getScheduleBlocks(): Promise<{
@@ -53,6 +61,8 @@ export async function getScheduleBlocks(): Promise<{
       .eq('id', user.id)
       .single();
     
+    console.log('📋 profile:', profile);  // 디버그
+    
     if (!profile) {
       return { success: false, error: '프로필을 찾을 수 없습니다' };
     }
@@ -60,7 +70,7 @@ export async function getScheduleBlocks(): Promise<{
     const isOwner = profile.role === 'owner';
     
     // 1. 스케줄 블록 조회
-    let query = supabase
+    let scheduleQuery = supabase
       .from('class_schedules')
       .select(`
         id,
@@ -81,6 +91,7 @@ export async function getScheduleBlocks(): Promise<{
       .order('start_time');
     
     // 선생님은 자기 반만 (class_teachers 기반)
+    let myClassIds: string[] = [];
     if (!isOwner) {
       const { data: myClassTeachers } = await supabase
         .from('class_teachers')
@@ -90,7 +101,7 @@ export async function getScheduleBlocks(): Promise<{
         .eq('is_active', true)
         .is('deleted_at', null);
       
-      const myClassIds = (myClassTeachers || []).map(ct => ct.class_id);
+      myClassIds = (myClassTeachers || []).map(ct => ct.class_id);
       
       if (myClassIds.length === 0) {
         return { 
@@ -107,14 +118,17 @@ export async function getScheduleBlocks(): Promise<{
         };
       }
       
-      query = query.in('class_id', myClassIds);
+      scheduleQuery = scheduleQuery.in('class_id', myClassIds);
     }
     
-    const { data: schedules, error: schedulesError } = await query;
+    const { data: schedules, error: schedulesError } = await scheduleQuery;
+    
+    console.log('📅 schedules:', schedules);  // 디버그
+    console.log('❌ schedulesError:', schedulesError);  // 디버그
     
     if (schedulesError) throw schedulesError;
     
-    // 2. 각 반의 담당 선생님 조회 (class_teachers 기반)
+    // 2. 각 반의 담당 선생님 조회
     const classIds = [...new Set((schedules || []).map(s => s.class_id))];
     
     const classTeacherMap: Record<string, { id: string; name: string; color: string }> = {};
@@ -136,7 +150,6 @@ export async function getScheduleBlocks(): Promise<{
         .eq('is_active', true)
         .is('deleted_at', null);
       
-      // 반별 첫 번째 선생님 (담임)
       for (const ct of classTeachers || []) {
         if (ct.class_id && !classTeacherMap[ct.class_id]) {
           const teacher = ct.profiles as any;
@@ -149,27 +162,50 @@ export async function getScheduleBlocks(): Promise<{
       }
     }
     
-    // 3. 각 반의 학생 수 조회
-    const studentCounts: Record<string, number> = {};
+    // 3. 각 스케줄의 학생 목록 조회 (enrollment_schedule_assignments 기반)
+    const scheduleIds = (schedules || []).map(s => s.id);
+    const scheduleStudentsMap: Record<string, Student[]> = {};
     
-    if (classIds.length > 0) {
-      const { data: enrollmentCounts } = await supabase
-        .from('enrollments')
-        .select('class_id')
+    if (scheduleIds.length > 0) {
+      const { data: assignments } = await supabase
+        .from('enrollment_schedule_assignments')
+        .select(`
+          id,
+          class_schedule_id,
+          group_key,
+          students (
+            id,
+            name,
+            display_code
+          )
+        `)
         .eq('tenant_id', profile.tenant_id)
-        .in('class_id', classIds)
+        .in('class_schedule_id', scheduleIds)
         .is('end_date', null)
         .is('deleted_at', null);
       
-      // 반별로 카운트
-      for (const e of enrollmentCounts || []) {
-        if (e.class_id) {
-          studentCounts[e.class_id] = (studentCounts[e.class_id] || 0) + 1;
+      for (const a of assignments || []) {
+        if (a.class_schedule_id && a.students) {
+          const student = a.students as { id: string; name: string; display_code: string | null };
+          
+          if (!scheduleStudentsMap[a.class_schedule_id]) {
+            scheduleStudentsMap[a.class_schedule_id] = [];
+          }
+          scheduleStudentsMap[a.class_schedule_id].push({
+            id: student.id,
+            name: student.name,
+            displayCode: student.display_code || '',
+            assignmentId: a.id,
+            groupKey: a.group_key,
+          });
         }
       }
     }
     
     // 4. 블록 데이터 가공
+    console.log('🔢 schedules count:', (schedules || []).length);  // 디버그
+    console.log('🔢 schedules with classes:', (schedules || []).filter(s => s.classes).length);  // 디버그
+    
     const blocks: ScheduleBlock[] = (schedules || [])
       .filter(s => s.classes)
       .map(s => {
@@ -181,7 +217,7 @@ export async function getScheduleBlocks(): Promise<{
         };
         
         return {
-          id: s.id,
+          id: s.id,  // schedule_id
           classId: cls.id,
           className: cls.name,
           classColor: cls.color,
@@ -191,11 +227,11 @@ export async function getScheduleBlocks(): Promise<{
           teacherId: teacherInfo.id,
           teacherName: teacherInfo.name,
           teacherColor: teacherInfo.color,
-          studentCount: studentCounts[cls.id] || 0,
+          students: scheduleStudentsMap[s.id] || [],
         };
       });
     
-    // 5. 선생님 목록 (원장용 Legend)
+    // 5. 선생님 목록
     const teacherMap = new Map<string, Teacher>();
     
     for (const block of blocks) {
@@ -208,7 +244,6 @@ export async function getScheduleBlocks(): Promise<{
       }
     }
     
-    // "미지정" 그룹도 추가
     const hasUnassigned = blocks.some(b => !b.teacherId);
     if (hasUnassigned) {
       teacherMap.set('', {
@@ -235,15 +270,14 @@ export async function getScheduleBlocks(): Promise<{
 }
 
 // ============================================================================
-// 블록 클릭 시 학생 명단 조회
+// 학생 드래그 이동 - 이 요일만
 // ============================================================================
 
-export async function getClassStudentsForBlock(classId: string): Promise<{
+export async function moveStudentThisDay(
+  assignmentId: string,
+  toScheduleId: string
+): Promise<{
   success: boolean;
-  data?: {
-    className: string;
-    students: { id: string; name: string; displayCode: string }[];
-  };
   error?: string;
 }> {
   try {
@@ -256,7 +290,7 @@ export async function getClassStudentsForBlock(classId: string): Promise<{
     
     const { data: profile } = await supabase
       .from('profiles')
-      .select('tenant_id')
+      .select('tenant_id, role')
       .eq('id', user.id)
       .single();
     
@@ -264,53 +298,250 @@ export async function getClassStudentsForBlock(classId: string): Promise<{
       return { success: false, error: '프로필을 찾을 수 없습니다' };
     }
     
-    // 반 정보
-    const { data: classInfo } = await supabase
-      .from('classes')
-      .select('name')
-      .eq('id', classId)
+    // 1. 기존 배정 확인
+    const { data: currentAssignment } = await supabase
+      .from('enrollment_schedule_assignments')
+      .select('id, student_id, class_schedule_id, group_key, tenant_id')
+      .eq('id', assignmentId)
       .eq('tenant_id', profile.tenant_id)
+      .is('end_date', null)
+      .is('deleted_at', null)
       .single();
     
-    // 학생 목록 (enrollments 기반)
-    const { data: enrollments, error } = await supabase
-      .from('enrollments')
+    if (!currentAssignment) {
+      return { success: false, error: '배정 정보를 찾을 수 없습니다' };
+    }
+    
+    // 2. 대상 스케줄 확인
+    const { data: toSchedule } = await supabase
+      .from('class_schedules')
+      .select('id, class_id, tenant_id')
+      .eq('id', toScheduleId)
+      .eq('tenant_id', profile.tenant_id)
+      .eq('is_active', true)
+      .is('deleted_at', null)
+      .single();
+    
+    if (!toSchedule) {
+      return { success: false, error: '대상 스케줄을 찾을 수 없습니다' };
+    }
+    
+    // 3. 권한 확인 (선생님은 자기 반끼리만)
+    if (profile.role !== 'owner') {
+      const { data: myClasses } = await supabase
+        .from('class_teachers')
+        .select('class_id')
+        .eq('tenant_id', profile.tenant_id)
+        .eq('teacher_id', user.id)
+        .eq('is_active', true)
+        .is('deleted_at', null);
+      
+      const myClassIds = (myClasses || []).map(c => c.class_id);
+      
+      if (!myClassIds.includes(toSchedule.class_id)) {
+        return { success: false, error: '권한이 없습니다. 자신의 담당 반으로만 이동 가능합니다.' };
+      }
+    }
+    
+    // 4. 기존 배정 종료
+    const today = new Date().toISOString().split('T')[0];
+    
+    const { error: endError } = await supabase
+      .from('enrollment_schedule_assignments')
+      .update({
+        end_date: today,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', assignmentId);
+    
+    if (endError) throw endError;
+    
+    // 5. 새 배정 생성 (group_key 유지)
+    const { error: insertError } = await supabase
+      .from('enrollment_schedule_assignments')
+      .insert({
+        tenant_id: profile.tenant_id,
+        student_id: currentAssignment.student_id,
+        class_schedule_id: toScheduleId,
+        group_key: currentAssignment.group_key,
+        start_date: today,
+        created_by: user.id,
+      });
+    
+    if (insertError) {
+      if (insertError.code === '23505') {
+        return { success: false, error: '이미 해당 시간에 배정된 학생입니다' };
+      }
+      throw insertError;
+    }
+    
+    return { success: true };
+  } catch (error) {
+    console.error('moveStudentThisDay error:', error);
+    return { success: false, error: '학생 이동에 실패했습니다' };
+  }
+}
+
+// ============================================================================
+// 학생 드래그 이동 - 그룹 전체 (같은 group_key)
+// ============================================================================
+
+export async function moveStudentWholeGroup(
+  assignmentId: string,
+  toScheduleId: string
+): Promise<{
+  success: boolean;
+  movedDays?: number[];
+  skippedDays?: number[];
+  error?: string;
+}> {
+  try {
+    const supabase = await createClient();
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { success: false, error: '로그인이 필요합니다' };
+    }
+    
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('tenant_id, role')
+      .eq('id', user.id)
+      .single();
+    
+    if (!profile) {
+      return { success: false, error: '프로필을 찾을 수 없습니다' };
+    }
+    
+    // 1. 기존 배정 확인
+    const { data: currentAssignment } = await supabase
+      .from('enrollment_schedule_assignments')
       .select(`
-        student_id,
-        students (
-          id,
-          name,
-          display_code
+        id, 
+        student_id, 
+        class_schedule_id, 
+        group_key,
+        class_schedules (
+          class_id,
+          day_of_week,
+          start_time,
+          end_time
+        )
+      `)
+      .eq('id', assignmentId)
+      .eq('tenant_id', profile.tenant_id)
+      .is('end_date', null)
+      .is('deleted_at', null)
+      .single();
+    
+    if (!currentAssignment) {
+      return { success: false, error: '배정 정보를 찾을 수 없습니다' };
+    }
+    
+    if (!currentAssignment.group_key) {
+      return { success: false, error: '그룹 정보가 없어 전체 변경이 불가능합니다' };
+    }
+    
+    // 2. 대상 스케줄 확인
+    const { data: toSchedule } = await supabase
+      .from('class_schedules')
+      .select('id, class_id, day_of_week, start_time, end_time')
+      .eq('id', toScheduleId)
+      .eq('tenant_id', profile.tenant_id)
+      .eq('is_active', true)
+      .is('deleted_at', null)
+      .single();
+    
+    if (!toSchedule) {
+      return { success: false, error: '대상 스케줄을 찾을 수 없습니다' };
+    }
+    
+    // 3. 같은 group_key의 모든 활성 배정 조회
+    const { data: groupAssignments } = await supabase
+      .from('enrollment_schedule_assignments')
+      .select(`
+        id,
+        class_schedule_id,
+        class_schedules (
+          day_of_week,
+          start_time,
+          end_time
         )
       `)
       .eq('tenant_id', profile.tenant_id)
-      .eq('class_id', classId)
+      .eq('student_id', currentAssignment.student_id)
+      .eq('group_key', currentAssignment.group_key)
       .is('end_date', null)
       .is('deleted_at', null);
     
-    if (error) throw error;
+    if (!groupAssignments || groupAssignments.length === 0) {
+      return { success: false, error: '그룹 배정을 찾을 수 없습니다' };
+    }
     
-    const students = (enrollments || [])
-      .filter(e => e.students)
-      .map(e => {
-        const s = e.students as { id: string; name: string; display_code: string | null };
-        return {
-          id: s.id,
-          name: s.name,
-          displayCode: s.display_code || '',
-        };
-      });
+    // 4. 대상 반의 모든 스케줄 조회 (같은 시간대)
+    const { data: targetClassSchedules } = await supabase
+      .from('class_schedules')
+      .select('id, day_of_week, start_time, end_time')
+      .eq('tenant_id', profile.tenant_id)
+      .eq('class_id', toSchedule.class_id)
+      .eq('start_time', toSchedule.start_time)
+      .eq('end_time', toSchedule.end_time)
+      .eq('is_active', true)
+      .is('deleted_at', null);
     
-    return {
-      success: true,
-      data: {
-        className: classInfo?.name || '알 수 없음',
-        students,
-      },
+    // 요일별로 매핑
+    const targetScheduleByDay: Record<number, string> = {};
+    for (const ts of targetClassSchedules || []) {
+      targetScheduleByDay[ts.day_of_week] = ts.id;
+    }
+    
+    // 5. 매핑 계산
+    const today = new Date().toISOString().split('T')[0];
+    const movedDays: number[] = [];
+    const skippedDays: number[] = [];
+    
+    for (const ga of groupAssignments) {
+      const schedule = ga.class_schedules as { day_of_week: number; start_time: string; end_time: string };
+      const dayOfWeek = schedule.day_of_week;
+      
+      if (targetScheduleByDay[dayOfWeek]) {
+        // 이동 가능
+        movedDays.push(dayOfWeek);
+        
+        // 기존 종료
+        await supabase
+          .from('enrollment_schedule_assignments')
+          .update({
+            end_date: today,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', ga.id);
+        
+        // 새 배정
+        await supabase
+          .from('enrollment_schedule_assignments')
+          .insert({
+            tenant_id: profile.tenant_id,
+            student_id: currentAssignment.student_id,
+            class_schedule_id: targetScheduleByDay[dayOfWeek],
+            group_key: currentAssignment.group_key,
+            start_date: today,
+            created_by: user.id,
+          });
+      } else {
+        // 대상 슬롯 없음
+        skippedDays.push(dayOfWeek);
+      }
+    }
+    
+    return { 
+      success: true, 
+      movedDays,
+      skippedDays,
     };
   } catch (error) {
-    console.error('getClassStudentsForBlock error:', error);
-    return { success: false, error: '학생 목록을 불러오는데 실패했습니다' };
+    console.error('moveStudentWholeGroup error:', error);
+    return { success: false, error: '학생 이동에 실패했습니다' };
   }
 }
 
@@ -345,7 +576,6 @@ export async function createSchedule(input: {
       return { success: false, error: '프로필을 찾을 수 없습니다' };
     }
     
-    // 원장만 가능
     if (profile.role !== 'owner') {
       return { success: false, error: '권한이 없습니다' };
     }
@@ -401,7 +631,6 @@ export async function deleteSchedule(scheduleId: string): Promise<{
       return { success: false, error: '프로필을 찾을 수 없습니다' };
     }
     
-    // 원장만 가능
     if (profile.role !== 'owner') {
       return { success: false, error: '권한이 없습니다' };
     }
@@ -425,7 +654,7 @@ export async function deleteSchedule(scheduleId: string): Promise<{
 }
 
 // ============================================================================
-// 반 목록 조회 (스케줄 추가용) - class_teachers 기반
+// 반 목록 조회 (스케줄 추가용)
 // ============================================================================
 
 export async function getClassesForSchedule(): Promise<{
@@ -451,7 +680,6 @@ export async function getClassesForSchedule(): Promise<{
       return { success: false, error: '프로필을 찾을 수 없습니다' };
     }
     
-    // 반 목록 조회
     const { data: classesData, error } = await supabase
       .from('classes')
       .select('id, name')
@@ -461,7 +689,6 @@ export async function getClassesForSchedule(): Promise<{
     
     if (error) throw error;
     
-    // 각 반의 담당 선생님 조회
     const classIds = (classesData || []).map(c => c.id);
     
     const classTeacherMap: Record<string, string> = {};
