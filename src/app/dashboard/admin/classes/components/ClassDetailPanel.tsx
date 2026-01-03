@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { X, Plus, UserMinus, GraduationCap, Users, Search, Clock, Trash2, ChevronDown, ChevronUp, Palette } from 'lucide-react';
+import { X, Plus, UserMinus, GraduationCap, Users, Search, Clock, Trash2, ChevronDown, ChevronUp, Palette, ArrowRight } from 'lucide-react';
 
 import type { Class, ClassTeacher, ClassMember, ClassSchedule } from '../types';
 import { styles, TEACHER_ROLES, CLASS_COLORS } from '../constants';
@@ -21,11 +21,13 @@ type Props = {
   schedules: ClassSchedule[];
   availableTeachers: { id: string; name: string; display_name: string }[];
   availableStudents: { id: string; name: string; display_code: string }[];
+  allClasses: { id: string; name: string; color: string }[];  // 전체 반 목록 (이동용)
   onClose: () => void;
   onAssignTeacher: (teacherId: string, role: 'primary' | 'assistant') => Promise<boolean>;
   onUnassignTeacher: (teacherId: string) => Promise<boolean>;
   onEnrollStudent: (studentId: string) => Promise<boolean>;
   onUnenrollStudent: (studentId: string) => Promise<boolean>;
+  onMoveStudent: (studentId: string, toClassId: string) => Promise<boolean>;  // 학생 이동
   onEnrollStudentsBulk: (studentIds: string[]) => Promise<boolean>;
   onAddSchedulesBulk: (schedules: { dayOfWeek: number; startTime: string; endTime: string }[]) => Promise<boolean>;
   onRemoveSchedule: (scheduleId: string) => Promise<boolean>;
@@ -40,11 +42,13 @@ export function ClassDetailPanel({
   schedules,
   availableTeachers,
   availableStudents,
+  allClasses,
   onClose,
   onAssignTeacher,
   onUnassignTeacher,
   onEnrollStudent,
   onUnenrollStudent,
+  onMoveStudent,
   onEnrollStudentsBulk,
   onAddSchedulesBulk,
   onRemoveSchedule,
@@ -66,12 +70,18 @@ export function ClassDetailPanel({
   const [studentSearch, setStudentSearch] = useState('');
   const [selectedStudents, setSelectedStudents] = useState<Set<string>>(new Set());
   
+  // 학생 이동 상태
+  const [movingStudentId, setMovingStudentId] = useState<string | null>(null);
+  
   // 스케줄 폼 - 요일 다중 선택
   const [selectedDays, setSelectedDays] = useState<Set<number>>(new Set());
   const [startHour, setStartHour] = useState(14);
   const [startMinute, setStartMinute] = useState(0);
   const [endHour, setEndHour] = useState(15);
   const [endMinute, setEndMinute] = useState(0);
+
+  // 이동 가능한 반 (현재 반 제외)
+  const otherClasses = allClasses.filter(c => c.id !== cls.id);
 
   // 아코디언 토글
   const toggleSection = (section: keyof typeof openSections) => {
@@ -296,12 +306,53 @@ export function ClassDetailPanel({
                       <span className="text-sm font-medium text-[#37352F]">{member.student?.name ?? '알 수 없음'}</span>
                       <span className="ml-2 text-xs text-gray-400">({member.student?.display_code})</span>
                     </div>
-                    <button
-                      className="p-1 text-gray-400 hover:text-red-500 transition-colors"
-                      onClick={() => onUnenrollStudent(member.student_id)}
-                    >
-                      <UserMinus className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      {/* 반 이동 */}
+                      {movingStudentId === member.student_id ? (
+                        <div className="flex items-center gap-1">
+                          <select
+                            className="text-xs border border-gray-200 rounded px-2 py-1"
+                            onChange={async (e) => {
+                              if (e.target.value) {
+                                await onMoveStudent(member.student_id, e.target.value);
+                                setMovingStudentId(null);
+                              }
+                            }}
+                            defaultValue=""
+                          >
+                            <option value="" disabled>이동할 반</option>
+                            {otherClasses.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            className="p-1 text-gray-400 hover:text-gray-600"
+                            onClick={() => setMovingStudentId(null)}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            className="p-1 text-gray-400 hover:text-blue-500 transition-colors"
+                            onClick={() => setMovingStudentId(member.student_id)}
+                            title="반 이동"
+                          >
+                            <ArrowRight className="w-4 h-4" />
+                          </button>
+                          <button
+                            className="p-1 text-gray-400 hover:text-red-500 transition-colors"
+                            onClick={() => onUnenrollStudent(member.student_id)}
+                            title="반에서 제거"
+                          >
+                            <UserMinus className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 ))
               )}

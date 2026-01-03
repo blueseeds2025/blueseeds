@@ -25,6 +25,7 @@ import {
   addClassSchedulesBulk,
   removeClassSchedule,
 } from '../actions/class.actions';
+import { moveStudentToClass } from '../../students/actions/student.actions';
 
 export function useClasses() {
   // ============ State ============
@@ -239,6 +240,21 @@ export function useClasses() {
     }
   }, [selectedClass, selectClass]);
 
+  const handleMoveStudent = useCallback(async (studentId: string, toClassId: string): Promise<boolean> => {
+    if (!selectedClass) return false;
+
+    const result = await moveStudentToClass(studentId, selectedClass.id, toClassId);
+    
+    if (result.ok) {
+      toast.success('학생이 이동되었습니다');
+      await selectClass(selectedClass);
+      return true;
+    } else {
+      toast.error(result.message);
+      return false;
+    }
+  }, [selectedClass, selectClass]);
+
   // ============ Schedule Management ============
   const handleAddSchedule = useCallback(async (
     dayOfWeek: number, 
@@ -358,6 +374,7 @@ export function useClasses() {
     handleEnrollStudent,
     handleUnenrollStudent,
     handleEnrollStudentsBulk,
+    handleMoveStudent,
 
     // 스케줄 관리
     handleAddSchedule,

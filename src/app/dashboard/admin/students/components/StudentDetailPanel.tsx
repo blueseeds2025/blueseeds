@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   X, 
   Plus, 
@@ -16,11 +16,14 @@ import {
   Loader2,
   MapPin,
   User,
+  History,
+  ArrowRightLeft,
 } from 'lucide-react';
 
 import type { StudentWithDetails, ClassInfo } from '../types';
 import { gradeToText } from '../types';
 import { styles } from '../constants';
+import { getStudentEnrollmentHistory, type EnrollmentHistoryItem } from '../actions/student.actions';
 
 type Props = {
   student: StudentWithDetails;
@@ -35,6 +38,8 @@ type Props = {
   onMoveToClass: (fromClassId: string, toClassId: string) => Promise<boolean>;
 };
 
+type TabType = 'info' | 'history';
+
 export function StudentDetailPanel({
   student,
   availableClasses,
@@ -47,6 +52,7 @@ export function StudentDetailPanel({
   onUnenrollFromClass,
   onMoveToClass,
 }: Props) {
+  const [activeTab, setActiveTab] = useState<TabType>('info');
   const [showAddClass, setShowAddClass] = useState(false);
   const [moveFromClassId, setMoveFromClassId] = useState<string | null>(null);
   
@@ -55,6 +61,10 @@ export function StudentDetailPanel({
   const [enrolledClassId, setEnrolledClassId] = useState<string | null>(null);
   const [unenrollingClassId, setUnenrollingClassId] = useState<string | null>(null);
 
+  // 이력 데이터
+  const [historyItems, setHistoryItems] = useState<EnrollmentHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
   // 현재 등록된 반 ID 목록
   const enrolledClassIds = new Set(
     student.enrollments.filter(e => e.is_active).map(e => e.class_id)
@@ -62,6 +72,22 @@ export function StudentDetailPanel({
 
   // 등록 가능한 반 (현재 미등록)
   const unenrolledClasses = availableClasses.filter(c => !enrolledClassIds.has(c.id));
+
+  // 이력 탭 선택 시 데이터 로드
+  useEffect(() => {
+    if (activeTab === 'history' && historyItems.length === 0) {
+      loadHistory();
+    }
+  }, [activeTab]);
+
+  async function loadHistory() {
+    setHistoryLoading(true);
+    const result = await getStudentEnrollmentHistory(student.id);
+    if (result.ok && result.data) {
+      setHistoryItems(result.data);
+    }
+    setHistoryLoading(false);
+  }
 
   // 반 등록 핸들러 (로딩 + 성공 애니메이션)
   const handleEnrollToClass = async (classId: string) => {
@@ -89,7 +115,7 @@ export function StudentDetailPanel({
     <div className="bg-white rounded-lg border border-[#E8E5E0] h-full flex flex-col">
       {/* 헤더 */}
       <div className="p-4 border-b border-[#E8E5E0]">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <h2 className="font-semibold text-lg text-[#37352F]">{student.name}</h2>
             <span className={student.is_active ? styles.badge.active : styles.badge.inactive}>
@@ -103,11 +129,39 @@ export function StudentDetailPanel({
             <X className="w-5 h-5 text-gray-400" />
           </button>
         </div>
+        
+        {/* 탭 */}
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+          <button
+            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'info'
+                ? 'bg-white text-[#37352F] shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+            onClick={() => setActiveTab('info')}
+          >
+            <User className="w-4 h-4" />
+            기본 정보
+          </button>
+          <button
+            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'history'
+                ? 'bg-white text-[#37352F] shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+            onClick={() => setActiveTab('history')}
+          >
+            <History className="w-4 h-4" />
+            반 이력
+          </button>
+        </div>
       </div>
 
       {/* 컨텐츠 */}
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        {/* 기본 정보 */}
+        {activeTab === 'info' ? (
+          <>
+            {/* 기본 정보 탭 */}
         <section>
           <h3 className="text-sm font-medium text-[#37352F] mb-3">기본 정보</h3>
           <div className="space-y-2">
@@ -334,27 +388,74 @@ export function StudentDetailPanel({
             </div>
           )}
         </section>
-
-        {/* 수강 이력 (비활성 상태) */}
-        {student.enrollments.some(e => !e.is_active) && (
+          </>
+        ) : (
+          /* 반 이력 탭 */
           <section>
-            <h3 className="text-sm font-medium text-gray-400 mb-3">이전 수강 이력</h3>
-            <div className="space-y-1">
-              {student.enrollments
-                .filter(e => !e.is_active)
-                .map((enrollment) => (
-                  <div
-                    key={enrollment.id}
-                    className="flex items-center gap-2 p-2 text-sm text-gray-400"
-                  >
-                    <div
-                      className="w-2 h-2 rounded-full opacity-50"
-                      style={{ backgroundColor: enrollment.class_color }}
-                    />
-                    <span>{enrollment.class_name}</span>
-                  </div>
-                ))}
-            </div>
+            <h3 className="text-sm font-medium text-[#37352F] mb-4">반 변동 이력</h3>
+            
+            {historyLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+              </div>
+            ) : historyItems.length === 0 ? (
+              <div className="text-center py-8 text-gray-400">
+                <History className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">반 이력이 없습니다</p>
+              </div>
+            ) : (
+              <div className="relative">
+                {/* 타임라인 세로선 */}
+                <div className="absolute left-[7px] top-2 bottom-2 w-0.5 bg-gray-200" />
+                
+                <div className="space-y-4">
+                  {historyItems.map((item, index) => (
+                    <div key={item.id} className="relative flex gap-3">
+                      {/* 타임라인 점 */}
+                      <div className={`relative z-10 w-4 h-4 rounded-full border-2 mt-0.5 ${
+                        item.action === 'enrolled' 
+                          ? 'bg-green-100 border-green-500'
+                          : 'bg-red-100 border-red-400'
+                      }`} />
+                      
+                      {/* 내용 */}
+                      <div className="flex-1 pb-2">
+                        <div className="flex items-center gap-2 mb-1">
+                          <div
+                            className="w-3 h-3 rounded-full"
+                            style={{ backgroundColor: item.class_color }}
+                          />
+                          <span className="font-medium text-sm text-[#37352F]">
+                            {item.class_name}
+                          </span>
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${
+                            item.action === 'enrolled'
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-red-100 text-red-600'
+                          }`}>
+                            {item.action === 'enrolled' ? '등록' : '종료'}
+                          </span>
+                        </div>
+                        
+                        <div className="text-xs text-gray-500 space-y-0.5">
+                          <p>
+                            {item.action === 'enrolled' 
+                              ? `${item.start_date} 등록`
+                              : `${item.end_date} 종료`
+                            }
+                          </p>
+                          {item.created_by_name && (
+                            <p className="text-gray-400">
+                              변경자: {item.created_by_name}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </section>
         )}
       </div>

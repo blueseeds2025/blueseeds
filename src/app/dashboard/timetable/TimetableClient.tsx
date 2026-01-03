@@ -1,12 +1,9 @@
 'use client';
 
 import { useState, useEffect, DragEvent } from 'react';
-import { X, Plus, Users, Clock } from 'lucide-react';
+import { X, Clock } from 'lucide-react';
 import { 
   getScheduleBlocks, 
-  createSchedule,
-  deleteSchedule,
-  getClassesForSchedule,
   moveStudentThisDay,
   moveStudentWholeGroup,
   ScheduleBlock,
@@ -20,13 +17,13 @@ import { toast } from 'sonner';
 // ============================================================================
 
 const DAYS = [
-  { value: 0, label: '일' },
   { value: 1, label: '월' },
   { value: 2, label: '화' },
   { value: 3, label: '수' },
   { value: 4, label: '목' },
   { value: 5, label: '금' },
   { value: 6, label: '토' },
+  { value: 0, label: '일' },
 ];
 
 const DAY_NAMES: Record<number, string> = {
@@ -39,12 +36,8 @@ const MIN_HOUR = 6;
 const MAX_HOUR = 24;
 const SLOT_HEIGHT = 48;
 
-const TIME_OPTIONS: string[] = [];
-for (let h = 6; h <= 23; h++) {
-  TIME_OPTIONS.push(`${h.toString().padStart(2, '0')}:00`);
-  TIME_OPTIONS.push(`${h.toString().padStart(2, '0')}:30`);
-}
-TIME_OPTIONS.push('24:00');
+// 기본 선택 요일 (월~금)
+const DEFAULT_SELECTED_DAYS = new Set([1, 2, 3, 4, 5]);
 
 // ============================================================================
 // 유틸 함수
@@ -89,9 +82,15 @@ export default function TimetableClient() {
   const [startHour, setStartHour] = useState(DEFAULT_START_HOUR);
   const [endHour, setEndHour] = useState(DEFAULT_END_HOUR);
   
+  // 요일 선택 상태
+  const [selectedDays, setSelectedDays] = useState<Set<number>>(DEFAULT_SELECTED_DAYS);
+  
   // 드래그 상태
   const [dragData, setDragData] = useState<DragData | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  
+  // 블록 확장 상태
+  const [expandedBlockId, setExpandedBlockId] = useState<string | null>(null);
   
   // 변경 확인 모달
   const [moveModal, setMoveModal] = useState<{
@@ -101,16 +100,6 @@ export default function TimetableClient() {
     toBlock: ScheduleBlock | null;
   }>({ open: false, student: null, fromBlock: null, toBlock: null });
   const [isMoving, setIsMoving] = useState(false);
-  
-  // 스케줄 추가 모달
-  const [addModal, setAddModal] = useState(false);
-  const [classes, setClasses] = useState<{ id: string; name: string; teacherName: string }[]>([]);
-  const [formData, setFormData] = useState({
-    classId: '',
-    dayOfWeek: 1,
-    startTime: '14:00',
-    endTime: '15:00',
-  });
 
   // ============================================================================
   // 데이터 로드
@@ -119,6 +108,20 @@ export default function TimetableClient() {
   useEffect(() => {
     loadSchedule();
   }, []);
+
+  // 바깥 클릭 시 확장 블록 닫기
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as HTMLElement;
+      // 확장된 블록 외부 클릭 시 닫기
+      if (expandedBlockId && !target.closest('[data-block-expanded]')) {
+        setExpandedBlockId(null);
+      }
+    }
+    
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [expandedBlockId]);
 
   async function loadSchedule() {
     setLoading(true);
@@ -135,6 +138,25 @@ export default function TimetableClient() {
     
     setLoading(false);
   }
+
+  // 요일 토글
+  function toggleDay(day: number) {
+    setSelectedDays(prev => {
+      const next = new Set(prev);
+      if (next.has(day)) {
+        // 최소 1개는 선택되어야 함
+        if (next.size > 1) {
+          next.delete(day);
+        }
+      } else {
+        next.add(day);
+      }
+      return next;
+    });
+  }
+
+  // 선택된 요일만 필터
+  const visibleDays = DAYS.filter(d => selectedDays.has(d.value));
 
   // ============================================================================
   // 드래그 앤 드롭 핸들러
@@ -192,6 +214,7 @@ export default function TimetableClient() {
     if (!moveModal.student || !moveModal.toBlock) return;
     
     setIsMoving(true);
+    const targetBlockId = moveModal.toBlock.id;
     
     const result = await moveStudentThisDay(
       moveModal.student.assignmentId,
@@ -203,7 +226,9 @@ export default function TimetableClient() {
         `${moveModal.student.name}: ${DAY_NAMES[moveModal.fromBlock!.dayOfWeek]}요일 ${moveModal.fromBlock!.startTime} → ${moveModal.toBlock.startTime} 변경 완료`
       );
       setMoveModal({ open: false, student: null, fromBlock: null, toBlock: null });
-      loadSchedule();
+      await loadSchedule();
+      // 이동 완료 후 목적지 블록 포커스
+      setExpandedBlockId(targetBlockId);
     } else {
       toast.error(result.error || '변경에 실패했습니다');
     }
@@ -215,6 +240,7 @@ export default function TimetableClient() {
     if (!moveModal.student || !moveModal.toBlock) return;
     
     setIsMoving(true);
+    const targetBlockId = moveModal.toBlock.id;
     
     const result = await moveStudentWholeGroup(
       moveModal.student.assignmentId,
@@ -234,61 +260,14 @@ export default function TimetableClient() {
       }
       
       setMoveModal({ open: false, student: null, fromBlock: null, toBlock: null });
-      loadSchedule();
+      await loadSchedule();
+      // 이동 완료 후 목적지 블록 포커스
+      setExpandedBlockId(targetBlockId);
     } else {
       toast.error(result.error || '변경에 실패했습니다');
     }
     
     setIsMoving(false);
-  }
-
-  // ============================================================================
-  // 스케줄 추가/삭제
-  // ============================================================================
-
-  async function openAddModal() {
-    const result = await getClassesForSchedule();
-    if (result.success && result.data) {
-      setClasses(result.data);
-      if (result.data.length > 0) {
-        setFormData(prev => ({ ...prev, classId: result.data![0].id }));
-      }
-      setAddModal(true);
-    } else {
-      toast.error(result.error || '반 목록을 불러오지 못했습니다');
-    }
-  }
-
-  async function handleAddSchedule() {
-    if (!formData.classId) {
-      toast.error('반을 선택해주세요');
-      return;
-    }
-    
-    const result = await createSchedule(formData);
-    
-    if (result.success) {
-      toast.success('스케줄이 추가되었습니다');
-      setAddModal(false);
-      loadSchedule();
-    } else {
-      toast.error(result.error || '스케줄 추가에 실패했습니다');
-    }
-  }
-
-  async function handleDeleteSchedule(scheduleId: string, e: React.MouseEvent) {
-    e.stopPropagation();
-    
-    if (!confirm('이 스케줄을 삭제하시겠습니까?')) return;
-    
-    const result = await deleteSchedule(scheduleId);
-    
-    if (result.success) {
-      toast.success('스케줄이 삭제되었습니다');
-      loadSchedule();
-    } else {
-      toast.error(result.error || '스케줄 삭제에 실패했습니다');
-    }
   }
 
   // ============================================================================
@@ -340,16 +319,6 @@ export default function TimetableClient() {
       {/* 헤더 */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-[#111827]">시간표</h1>
-        
-        {userRole === 'owner' && (
-          <button
-            onClick={openAddModal}
-            className="flex items-center gap-2 px-4 py-2 bg-[#6366F1] text-white rounded-lg hover:bg-[#4F46E5] transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            스케줄 추가
-          </button>
-        )}
       </div>
 
       {/* 선생님 필터 (원장만) */}
@@ -382,73 +351,98 @@ export default function TimetableClient() {
         </div>
       )}
 
-      {/* 시간 범위 조절 */}
-      <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-[#E5E7EB]">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-[#6B7280]">시작:</span>
+      {/* 요일 선택 + 시간 범위 조절 */}
+      <div className="flex flex-col gap-2">
+        {/* 요일 선택 */}
+        <div className="flex items-center gap-2 p-3 bg-white rounded-lg border border-[#E5E7EB]">
+          <span className="text-sm text-[#6B7280] mr-2">요일:</span>
+          {DAYS.map((day) => (
             <button
-              onClick={() => setStartHour(h => Math.max(MIN_HOUR, h - 1))}
-              disabled={startHour <= MIN_HOUR}
-              className="w-7 h-7 flex items-center justify-center rounded bg-[#F3F4F6] hover:bg-[#E5E7EB] disabled:opacity-30 disabled:cursor-not-allowed text-[#374151] font-medium"
+              key={day.value}
+              onClick={() => toggleDay(day.value)}
+              className={`w-8 h-8 text-sm font-medium rounded-full transition-colors ${
+                selectedDays.has(day.value)
+                  ? 'bg-[#6366F1] text-white'
+                  : 'bg-[#F3F4F6] text-[#6B7280] hover:bg-[#E5E7EB]'
+              }`}
             >
-              -
+              {day.label}
             </button>
-            <span className="text-sm font-medium text-[#111827] w-12 text-center">
-              {startHour.toString().padStart(2, '0')}:00
-            </span>
-            <button
-              onClick={() => setStartHour(h => Math.min(endHour - 1, h + 1))}
-              disabled={startHour >= endHour - 1}
-              className="w-7 h-7 flex items-center justify-center rounded bg-[#F3F4F6] hover:bg-[#E5E7EB] disabled:opacity-30 disabled:cursor-not-allowed text-[#374151] font-medium"
-            >
-              +
-            </button>
-          </div>
-          
-          <span className="text-[#D1D5DB]">~</span>
-          
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-[#6B7280]">종료:</span>
-            <button
-              onClick={() => setEndHour(h => Math.max(startHour + 1, h - 1))}
-              disabled={endHour <= startHour + 1}
-              className="w-7 h-7 flex items-center justify-center rounded bg-[#F3F4F6] hover:bg-[#E5E7EB] disabled:opacity-30 disabled:cursor-not-allowed text-[#374151] font-medium"
-            >
-              -
-            </button>
-            <span className="text-sm font-medium text-[#111827] w-12 text-center">
-              {endHour.toString().padStart(2, '0')}:00
-            </span>
-            <button
-              onClick={() => setEndHour(h => Math.min(MAX_HOUR, h + 1))}
-              disabled={endHour >= MAX_HOUR}
-              className="w-7 h-7 flex items-center justify-center rounded bg-[#F3F4F6] hover:bg-[#E5E7EB] disabled:opacity-30 disabled:cursor-not-allowed text-[#374151] font-medium"
-            >
-              +
-            </button>
-          </div>
+          ))}
         </div>
-        
-        <button
-          onClick={() => {
-            setStartHour(DEFAULT_START_HOUR);
-            setEndHour(DEFAULT_END_HOUR);
-          }}
-          className="text-xs text-[#6B7280] hover:text-[#374151] px-2 py-1"
-        >
-          기본값
-        </button>
+
+        {/* 시간 범위 조절 */}
+        <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-[#E5E7EB]">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-[#6B7280]">시작:</span>
+              <button
+                onClick={() => setStartHour(h => Math.max(MIN_HOUR, h - 1))}
+                disabled={startHour <= MIN_HOUR}
+                className="w-7 h-7 flex items-center justify-center rounded bg-[#F3F4F6] hover:bg-[#E5E7EB] disabled:opacity-30 disabled:cursor-not-allowed text-[#374151] font-medium"
+              >
+                -
+              </button>
+              <span className="text-sm font-medium text-[#111827] w-12 text-center">
+                {startHour.toString().padStart(2, '0')}:00
+              </span>
+              <button
+                onClick={() => setStartHour(h => Math.min(endHour - 1, h + 1))}
+                disabled={startHour >= endHour - 1}
+                className="w-7 h-7 flex items-center justify-center rounded bg-[#F3F4F6] hover:bg-[#E5E7EB] disabled:opacity-30 disabled:cursor-not-allowed text-[#374151] font-medium"
+              >
+                +
+              </button>
+            </div>
+            
+            <span className="text-[#D1D5DB]">~</span>
+            
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-[#6B7280]">종료:</span>
+              <button
+                onClick={() => setEndHour(h => Math.max(startHour + 1, h - 1))}
+                disabled={endHour <= startHour + 1}
+                className="w-7 h-7 flex items-center justify-center rounded bg-[#F3F4F6] hover:bg-[#E5E7EB] disabled:opacity-30 disabled:cursor-not-allowed text-[#374151] font-medium"
+              >
+                -
+              </button>
+              <span className="text-sm font-medium text-[#111827] w-12 text-center">
+                {endHour.toString().padStart(2, '0')}:00
+              </span>
+              <button
+                onClick={() => setEndHour(h => Math.min(MAX_HOUR, h + 1))}
+                disabled={endHour >= MAX_HOUR}
+                className="w-7 h-7 flex items-center justify-center rounded bg-[#F3F4F6] hover:bg-[#E5E7EB] disabled:opacity-30 disabled:cursor-not-allowed text-[#374151] font-medium"
+              >
+                +
+              </button>
+            </div>
+          </div>
+          
+          <button
+            onClick={() => {
+              setStartHour(DEFAULT_START_HOUR);
+              setEndHour(DEFAULT_END_HOUR);
+              setSelectedDays(DEFAULT_SELECTED_DAYS);
+            }}
+            className="text-xs text-[#6B7280] hover:text-[#374151] px-2 py-1"
+          >
+            기본값
+          </button>
+        </div>
       </div>
 
       {/* 시간표 그리드 */}
       <div className="bg-white rounded-xl shadow-sm border border-[#E5E7EB] overflow-hidden">
         <div className="overflow-x-auto">
-          <div className="min-w-[800px]">
+          <div className="min-w-[400px]">
             {/* 요일 헤더 */}
-            <div className="grid grid-cols-[80px_repeat(7,1fr)] border-b border-[#E5E7EB]">
+            <div 
+              className="grid border-b border-[#E5E7EB]"
+              style={{ gridTemplateColumns: `80px repeat(${visibleDays.length}, 1fr)` }}
+            >
               <div className="p-2 text-center text-xs text-[#9CA3AF] bg-[#F9FAFB]" />
-              {DAYS.map(day => (
+              {visibleDays.map(day => (
                 <div
                   key={day.value}
                   className="p-3 text-center text-sm font-medium text-[#374151] bg-[#F9FAFB] border-l border-[#E5E7EB]"
@@ -459,7 +453,10 @@ export default function TimetableClient() {
             </div>
 
             {/* 시간 그리드 */}
-            <div className="grid grid-cols-[80px_repeat(7,1fr)]">
+            <div 
+              className="grid"
+              style={{ gridTemplateColumns: `80px repeat(${visibleDays.length}, 1fr)` }}
+            >
               {/* 시간 레이블 */}
               <div className="relative">
                 {timeSlots.map((time, i) => (
@@ -476,7 +473,7 @@ export default function TimetableClient() {
               </div>
 
               {/* 요일별 칼럼 */}
-              {DAYS.map(day => {
+              {visibleDays.map(day => {
                 const dayBlocks = filteredBlocks.filter(b => b.dayOfWeek === day.value);
                 
                 return (
@@ -495,64 +492,87 @@ export default function TimetableClient() {
                     ))}
 
                     {/* 블록들 */}
-                    {dayBlocks.map(block => (
-                      <div
-                        key={block.id}
-                        onDragOver={(e) => handleDragOver(e, block.id)}
-                        onDragLeave={handleDragLeave}
-                        onDrop={(e) => handleDrop(e, block)}
-                        style={{
-                          ...getBlockStyle(block.startTime, block.endTime, startHour),
-                          borderLeftColor: block.teacherColor,
-                        }}
-                        className={`absolute left-1 right-1 rounded-lg p-2
-                                   bg-white border border-l-4 shadow-sm
-                                   overflow-hidden transition-all
-                                   ${dropTarget === block.id 
-                                     ? 'border-[#6366F1] bg-[#EEF2FF] shadow-md' 
-                                     : 'border-[#E5E7EB]'
-                                   }`}
-                      >
-                        {/* 반 이름 + 삭제 버튼 */}
-                        <div className="flex items-start justify-between mb-1">
+                    {dayBlocks.map(block => {
+                      const isExpanded = expandedBlockId === block.id;
+                      const baseStyle = getBlockStyle(block.startTime, block.endTime, startHour);
+                      
+                      return (
+                        <div
+                          key={block.id}
+                          data-block-expanded={isExpanded || undefined}
+                          onDragOver={(e) => handleDragOver(e, block.id)}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleDrop(e, block)}
+                          onClick={(e) => {
+                            // 클릭으로 확장/축소 (owner, teacher 모두)
+                            e.stopPropagation();
+                            setExpandedBlockId(isExpanded ? null : block.id);
+                          }}
+                          style={{
+                            ...baseStyle,
+                            borderLeftColor: block.teacherColor,
+                            // 확장 시 높이 auto + z-index 높임
+                            ...(isExpanded ? { 
+                              height: 'auto', 
+                              minHeight: baseStyle.height,
+                              zIndex: 50,
+                            } : {}),
+                          }}
+                          className={`absolute left-1 right-1 rounded-lg p-2
+                                     bg-white border border-l-4 shadow-sm
+                                     transition-all cursor-pointer hover:shadow-md
+                                     ${isExpanded ? 'overflow-visible shadow-lg' : 'overflow-hidden'}
+                                     ${dropTarget === block.id 
+                                       ? 'border-[#6366F1] bg-[#EEF2FF] shadow-md' 
+                                       : 'border-[#E5E7EB]'
+                                     }`}
+                        >
+                          {/* 반 이름 */}
                           <p className="text-sm font-medium text-[#111827] truncate">
                             {block.className}
+                            {block.students.length > 0 && (
+                              <span className="ml-1 text-xs text-[#9CA3AF]">
+                                ({block.students.length}명)
+                              </span>
+                            )}
                           </p>
-                          {userRole === 'owner' && (
-                            <button
-                              onClick={(e) => handleDeleteSchedule(block.id, e)}
-                              className="p-0.5 rounded hover:bg-[#FEE2E2] text-[#9CA3AF] hover:text-[#DC2626] transition-colors"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
+                          
+                          {/* 학생 목록 */}
+                          {isExpanded ? (
+                            // 확장 모드: 전체 학생 표시 + 드래그 가능
+                            block.students.length === 0 ? (
+                              <p className="text-xs text-[#9CA3AF] mt-1">학생 없음</p>
+                            ) : (
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {block.students.map(student => (
+                                  <span
+                                    key={student.id}
+                                    draggable
+                                    onDragStart={(e) => handleDragStart(e, student, block)}
+                                    onDragEnd={handleDragEnd}
+                                    className={`text-xs px-1.5 py-0.5 rounded cursor-grab active:cursor-grabbing
+                                               transition-colors select-none
+                                               ${dragData?.student.id === student.id
+                                                 ? 'bg-[#6366F1] text-white'
+                                                 : 'bg-[#F3F4F6] text-[#374151] hover:bg-[#E5E7EB]'
+                                               }`}
+                                  >
+                                    {student.name}
+                                  </span>
+                                ))}
+                              </div>
+                            )
+                          ) : (
+                            // 축소 모드: teacher만 콤마 나열, owner는 인원수만
+                            userRole === 'teacher' && block.students.length > 0 && (
+                              <p className="text-xs text-[#6B7280] truncate">
+                                {block.students.map(s => s.name).join(', ')}
+                              </p>
+                            )
                           )}
                         </div>
-                        
-                        {/* 학생 목록 (드래그 가능) */}
-                        {block.students.length === 0 ? (
-                          <p className="text-xs text-[#9CA3AF]">학생 없음</p>
-                        ) : (
-                          <div className="flex flex-wrap gap-1">
-                            {block.students.map(student => (
-                              <span
-                                key={student.id}
-                                draggable
-                                onDragStart={(e) => handleDragStart(e, student, block)}
-                                onDragEnd={handleDragEnd}
-                                className={`text-xs px-1.5 py-0.5 rounded cursor-grab active:cursor-grabbing
-                                           transition-colors select-none
-                                           ${dragData?.student.id === student.id
-                                             ? 'bg-[#6366F1] text-white'
-                                             : 'bg-[#F3F4F6] text-[#374151] hover:bg-[#E5E7EB]'
-                                           }`}
-                              >
-                                {student.name}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 );
               })}
@@ -566,14 +586,7 @@ export default function TimetableClient() {
         <div className="text-center py-12 text-[#9CA3AF]">
           <Clock className="w-12 h-12 mx-auto mb-3 opacity-50" />
           <p>등록된 스케줄이 없습니다</p>
-          {userRole === 'owner' && (
-            <button
-              onClick={openAddModal}
-              className="mt-4 text-[#6366F1] hover:underline"
-            >
-              + 스케줄 추가하기
-            </button>
-          )}
+          <p className="text-sm mt-1">반 관리에서 시간표를 설정해주세요</p>
         </div>
       )}
 
@@ -644,107 +657,6 @@ export default function TimetableClient() {
                 className="w-full px-4 py-2 text-[#6B7280] hover:text-[#374151]"
               >
                 취소
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 스케줄 추가 모달 */}
-      {addModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-xl w-full max-w-md mx-4 shadow-2xl">
-            <div className="flex items-center justify-between p-4 border-b border-[#E5E7EB]">
-              <h2 className="text-lg font-semibold text-[#111827]">
-                스케줄 추가
-              </h2>
-              <button
-                onClick={() => setAddModal(false)}
-                className="p-2 rounded-lg hover:bg-[#F3F4F6]"
-              >
-                <X className="w-5 h-5 text-[#6B7280]" />
-              </button>
-            </div>
-            
-            <div className="p-4 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-[#374151] mb-1">
-                  반 선택
-                </label>
-                <select
-                  value={formData.classId}
-                  onChange={e => setFormData(prev => ({ ...prev, classId: e.target.value }))}
-                  className="w-full px-3 py-2 border border-[#D1D5DB] rounded-lg focus:ring-2 focus:ring-[#6366F1]/30 focus:border-[#6366F1]"
-                >
-                  {classes.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.teacherName})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-[#374151] mb-1">
-                  요일
-                </label>
-                <select
-                  value={formData.dayOfWeek}
-                  onChange={e => setFormData(prev => ({ ...prev, dayOfWeek: Number(e.target.value) }))}
-                  className="w-full px-3 py-2 border border-[#D1D5DB] rounded-lg focus:ring-2 focus:ring-[#6366F1]/30 focus:border-[#6366F1]"
-                >
-                  {DAYS.map(day => (
-                    <option key={day.value} value={day.value}>
-                      {day.label}요일
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-[#374151] mb-1">
-                    시작 시간
-                  </label>
-                  <select
-                    value={formData.startTime}
-                    onChange={e => setFormData(prev => ({ ...prev, startTime: e.target.value }))}
-                    className="w-full px-3 py-2 border border-[#D1D5DB] rounded-lg focus:ring-2 focus:ring-[#6366F1]/30 focus:border-[#6366F1]"
-                  >
-                    {TIME_OPTIONS.slice(0, -1).map(time => (
-                      <option key={time} value={time}>{time}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-[#374151] mb-1">
-                    종료 시간
-                  </label>
-                  <select
-                    value={formData.endTime}
-                    onChange={e => setFormData(prev => ({ ...prev, endTime: e.target.value }))}
-                    className="w-full px-3 py-2 border border-[#D1D5DB] rounded-lg focus:ring-2 focus:ring-[#6366F1]/30 focus:border-[#6366F1]"
-                  >
-                    {TIME_OPTIONS.filter(t => t > formData.startTime).map(time => (
-                      <option key={time} value={time}>{time === '24:00' ? '24:00 (자정)' : time}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-            
-            <div className="flex gap-3 p-4 border-t border-[#E5E7EB]">
-              <button
-                onClick={() => setAddModal(false)}
-                className="flex-1 px-4 py-2 border border-[#D1D5DB] text-[#374151] rounded-lg hover:bg-[#F9FAFB]"
-              >
-                취소
-              </button>
-              <button
-                onClick={handleAddSchedule}
-                className="flex-1 px-4 py-2 bg-[#6366F1] text-white rounded-lg hover:bg-[#4F46E5]"
-              >
-                추가
               </button>
             </div>
           </div>

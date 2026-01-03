@@ -537,17 +537,36 @@ export async function createMonthlyReportsForClass(
   const { profile, supabase } = result;
   
   try {
-    const { data: members, error: membersError } = await supabase
-      .from('class_members')
-      .select('student_id')
+    // 해당 반의 스케줄 조회
+    const { data: schedules } = await supabase
+      .from('class_schedules')
+      .select('id')
+      .eq('tenant_id', profile.tenant_id)
       .eq('class_id', classId)
-      .eq('is_active', true);
+      .eq('is_active', true)
+      .is('deleted_at', null);
+
+    if (!schedules || schedules.length === 0) {
+      return { ok: false, message: '해당 반에 스케줄이 없습니다.' };
+    }
+
+    const scheduleIds = schedules.map(s => s.id);
+
+    // 해당 스케줄에 배정된 학생들 조회 (enrollment_schedule_assignments 기준)
+    const { data: assignments, error: assignmentsError } = await supabase
+      .from('enrollment_schedule_assignments')
+      .select('student_id')
+      .eq('tenant_id', profile.tenant_id)
+      .in('class_schedule_id', scheduleIds)
+      .is('end_date', null)
+      .is('deleted_at', null);
     
-    if (membersError) {
+    if (assignmentsError) {
       return { ok: false, message: '학생 목록 조회 실패' };
     }
     
-    const studentIds = members?.map((m) => m.student_id) || [];
+    // 중복 제거
+    const studentIds = [...new Set((assignments || []).map((a) => a.student_id).filter((id): id is string => !!id))];
     
     if (studentIds.length === 0) {
       return { ok: false, message: '해당 반에 학생이 없습니다.' };
@@ -613,26 +632,59 @@ export async function getStudentsForMonthlyReport(
   
   try {
     if (classId) {
-      const { data, error } = await supabase
-        .from('class_members')
-        .select(`
-          student:students!inner(id, name),
-          class:classes!inner(name)
-        `)
+      // 해당 반의 스케줄 조회
+      const { data: schedules } = await supabase
+        .from('class_schedules')
+        .select('id')
+        .eq('tenant_id', profile.tenant_id)
         .eq('class_id', classId)
-        .eq('is_active', true);
+        .eq('is_active', true)
+        .is('deleted_at', null);
+
+      if (!schedules || schedules.length === 0) {
+        return { ok: true, data: [] };
+      }
+
+      const scheduleIds = schedules.map(s => s.id);
+
+      // 해당 스케줄에 배정된 학생들 조회 (enrollment_schedule_assignments 기준)
+      const { data, error } = await supabase
+        .from('enrollment_schedule_assignments')
+        .select(`
+          student_id,
+          students!inner(id, name)
+        `)
+        .eq('tenant_id', profile.tenant_id)
+        .in('class_schedule_id', scheduleIds)
+        .is('end_date', null)
+        .is('deleted_at', null);
       
       if (error) {
         return { ok: false, message: '학생 목록 조회 실패' };
       }
+
+      // 반 이름 조회
+      const { data: classData } = await supabase
+        .from('classes')
+        .select('name')
+        .eq('id', classId)
+        .single();
+
+      const className = classData?.name || '';
       
-      const students = data?.map((d) => ({
-        id: (d.student as { id: string }).id,
-        name: (d.student as { name: string }).name,
-        class_name: (d.class as { name: string }).name,
-      })) || [];
+      // 학생별 중복 제거
+      const studentMap = new Map<string, { id: string; name: string; class_name?: string }>();
+      for (const d of data || []) {
+        if (!d.student_id || studentMap.has(d.student_id)) continue;
+        const student = d.students as { id: string; name: string };
+        studentMap.set(d.student_id, {
+          id: student.id,
+          name: student.name,
+          class_name: className,
+        });
+      }
       
-      return { ok: true, data: students };
+      return { ok: true, data: Array.from(studentMap.values()) };
     } else {
       const { data, error } = await supabase
         .from('students')

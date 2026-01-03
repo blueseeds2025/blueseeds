@@ -1,22 +1,24 @@
 // ============================================================================
 // 기본 항목 설정 섹션 (운영 설정 탭용)
+// textbooks 테이블 사용 (진도 입력용)
 // ============================================================================
 'use client';
 
 import { useState, useEffect } from 'react';
 import { Switch } from '@/components/ui/switch';
-import { BookOpen, FileText, Plus, Trash2, Loader2, Users, User, ClipboardList } from 'lucide-react';
+import { BookOpen, FileText, Plus, Trash2, Loader2, Users, User, ClipboardList, Pencil, Check, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  getMaterials,
-  createMaterial,
-  deleteMaterial,
-  getExamTypes,      // 🆕 추가
-  createExamType,    // 🆕 추가
-  deleteExamType,    // 🆕 추가
+  getTextbooks,
+  createTextbook,
+  updateTextbook,
+  deleteTextbook,
+  getExamTypes,
+  createExamType,
+  deleteExamType,
   type BasicSettings,
-  type Material,
-  type ExamType,     // 🆕 추가
+  type Textbook,
+  type ExamType,
   type OperationMode,
 } from '../actions/settings.actions';
 
@@ -38,14 +40,21 @@ export default function BasicSettingsSection({
   onUpdateOperationMode,
 }: BasicSettingsSectionProps) {
   // 교재 관련 상태
-  const [materials, setMaterials] = useState<Material[]>([]);
-  const [isLoadingMaterials, setIsLoadingMaterials] = useState(false);
-  const [isMaterialsExpanded, setIsMaterialsExpanded] = useState(false);
-  const [newMaterialName, setNewMaterialName] = useState('');
-  const [isAddingMaterial, setIsAddingMaterial] = useState(false);
-  const [deletingMaterialId, setDeletingMaterialId] = useState<string | null>(null);
+  const [textbooks, setTextbooks] = useState<Textbook[]>([]);
+  const [isLoadingTextbooks, setIsLoadingTextbooks] = useState(false);
+  const [isTextbooksExpanded, setIsTextbooksExpanded] = useState(false);
+  const [newTextbookTitle, setNewTextbookTitle] = useState('');
+  const [newTextbookPages, setNewTextbookPages] = useState('');
+  const [isAddingTextbook, setIsAddingTextbook] = useState(false);
+  const [deletingTextbookId, setDeletingTextbookId] = useState<string | null>(null);
+  
+  // 교재 수정 상태
+  const [editingTextbookId, setEditingTextbookId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
+  const [editingPages, setEditingPages] = useState('');
+  const [isSavingTextbook, setIsSavingTextbook] = useState(false);
 
-  // 🆕 시험 종류 관련 상태
+  // 시험 종류 관련 상태
   const [examTypes, setExamTypes] = useState<ExamType[]>([]);
   const [isLoadingExamTypes, setIsLoadingExamTypes] = useState(false);
   const [isExamTypesExpanded, setIsExamTypesExpanded] = useState(false);
@@ -56,27 +65,26 @@ export default function BasicSettingsSection({
   // 진도 ON일 때 교재 목록 로드
   useEffect(() => {
     if (settings.progress_enabled) {
-      loadMaterials();
+      loadTextbooks();
     }
   }, [settings.progress_enabled]);
 
-  // 🆕 시험 점수 ON일 때 시험 종류 로드
+  // 시험 점수 ON일 때 시험 종류 로드
   useEffect(() => {
     if (settings.exam_score_enabled) {
       loadExamTypes();
     }
   }, [settings.exam_score_enabled]);
 
-  async function loadMaterials() {
-    setIsLoadingMaterials(true);
-    const result = await getMaterials();
+  async function loadTextbooks() {
+    setIsLoadingTextbooks(true);
+    const result = await getTextbooks();
     if (result.ok) {
-      setMaterials(result.data);
+      setTextbooks(result.data);
     }
-    setIsLoadingMaterials(false);
+    setIsLoadingTextbooks(false);
   }
 
-  // 🆕 시험 종류 로드
   async function loadExamTypes() {
     setIsLoadingExamTypes(true);
     const result = await getExamTypes();
@@ -86,38 +94,80 @@ export default function BasicSettingsSection({
     setIsLoadingExamTypes(false);
   }
 
-  async function handleAddMaterial() {
-    if (!newMaterialName.trim()) return;
+  // 교재 추가
+  async function handleAddTextbook() {
+    if (!newTextbookTitle.trim()) return;
     
-    setIsAddingMaterial(true);
-    const result = await createMaterial(newMaterialName.trim());
+    setIsAddingTextbook(true);
+    const totalPages = newTextbookPages ? parseInt(newTextbookPages, 10) : undefined;
+    const result = await createTextbook(newTextbookTitle.trim(), totalPages);
     
     if (result.ok) {
-      setMaterials([...materials, result.data]);
-      setNewMaterialName('');
+      setTextbooks([...textbooks, result.data]);
+      setNewTextbookTitle('');
+      setNewTextbookPages('');
       toast.success('교재가 추가되었습니다');
     } else {
       toast.error(result.message);
     }
-    setIsAddingMaterial(false);
+    setIsAddingTextbook(false);
   }
 
-  async function handleDeleteMaterial(id: string, name: string) {
-    if (!confirm(`"${name}" 교재를 삭제할까요?`)) return;
+  // 교재 수정 시작
+  function startEditTextbook(textbook: Textbook) {
+    setEditingTextbookId(textbook.id);
+    setEditingTitle(textbook.title);
+    setEditingPages(textbook.total_pages?.toString() || '');
+  }
+
+  // 교재 수정 취소
+  function cancelEditTextbook() {
+    setEditingTextbookId(null);
+    setEditingTitle('');
+    setEditingPages('');
+  }
+
+  // 교재 수정 저장
+  async function saveEditTextbook(textbookId: string) {
+    if (!editingTitle.trim()) {
+      toast.error('교재명을 입력해주세요');
+      return;
+    }
     
-    setDeletingMaterialId(id);
-    const result = await deleteMaterial(id);
+    setIsSavingTextbook(true);
+    const totalPages = editingPages ? parseInt(editingPages, 10) : null;
+    const result = await updateTextbook(textbookId, {
+      title: editingTitle.trim(),
+      total_pages: totalPages,
+    });
     
     if (result.ok) {
-      setMaterials(materials.filter(m => m.id !== id));
+      setTextbooks(textbooks.map(t => t.id === textbookId ? result.data : t));
+      cancelEditTextbook();
+      toast.success('교재가 수정되었습니다');
+    } else {
+      toast.error(result.message);
+    }
+    setIsSavingTextbook(false);
+  }
+
+  // 교재 삭제
+  async function handleDeleteTextbook(id: string, title: string) {
+    if (!confirm(`"${title}" 교재를 삭제할까요?\n\n⚠️ 이미 입력된 진도 기록은 유지됩니다.`)) return;
+    
+    setDeletingTextbookId(id);
+    const result = await deleteTextbook(id);
+    
+    if (result.ok) {
+      setTextbooks(textbooks.filter(t => t.id !== id));
       toast.success('교재가 삭제되었습니다');
     } else {
       toast.error(result.message);
     }
-    setDeletingMaterialId(null);
+    setDeletingTextbookId(null);
   }
 
-  // 🆕 시험 종류 추가
+  // 시험 종류 추가
   async function handleAddExamType() {
     if (!newExamTypeName.trim()) return;
     
@@ -134,7 +184,7 @@ export default function BasicSettingsSection({
     setIsAddingExamType(false);
   }
 
-  // 🆕 시험 종류 삭제
+  // 시험 종류 삭제
   async function handleDeleteExamType(id: string, name: string) {
     if (!confirm(`"${name}" 시험을 삭제할까요?\n\n⚠️ 이미 입력된 점수 데이터는 유지되지만, 더 이상 입력할 수 없게 됩니다.`)) return;
     
@@ -150,14 +200,13 @@ export default function BasicSettingsSection({
     setDeletingExamTypeId(null);
   }
 
-  function handleMaterialKeyDown(e: React.KeyboardEvent) {
+  function handleTextbookKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      handleAddMaterial();
+      handleAddTextbook();
     }
   }
 
-  // 🆕 시험 종류 엔터 키
   function handleExamTypeKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
       e.preventDefault();
@@ -268,22 +317,22 @@ export default function BasicSettingsSection({
             <div className="p-4 border-t border-stone-200 bg-white">
               {/* 헤더 - 클릭하면 펼치기/접기 */}
               <button
-                onClick={() => setIsMaterialsExpanded(!isMaterialsExpanded)}
+                onClick={() => setIsTextbooksExpanded(!isTextbooksExpanded)}
                 className="w-full flex items-center justify-between text-left"
               >
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-stone-700">📚 사용 교재</span>
-                  <span className="text-xs text-stone-400">({materials.length}개)</span>
+                  <span className="text-xs text-stone-400">({textbooks.length}개)</span>
                 </div>
                 <span className="text-xs text-[#6366F1] hover:underline">
-                  {isMaterialsExpanded ? '접기 ▲' : '펼치기 ▼'}
+                  {isTextbooksExpanded ? '접기 ▲' : '펼치기 ▼'}
                 </span>
               </button>
               
               {/* 펼쳐진 상태 */}
-              {isMaterialsExpanded && (
+              {isTextbooksExpanded && (
                 <div className="mt-3">
-                  {isLoadingMaterials ? (
+                  {isLoadingTextbooks ? (
                     <div className="flex items-center gap-2 text-sm text-stone-500 py-2">
                       <Loader2 className="w-4 h-4 animate-spin" />
                       불러오는 중...
@@ -291,55 +340,124 @@ export default function BasicSettingsSection({
                   ) : (
                     <div className="space-y-2">
                       {/* 교재 목록 (스크롤 영역) */}
-                      <div className="max-h-48 overflow-y-auto space-y-2">
-                        {materials.length === 0 ? (
+                      <div className="max-h-64 overflow-y-auto space-y-2">
+                        {textbooks.length === 0 ? (
                           <p className="text-sm text-stone-400 py-2">등록된 교재가 없습니다</p>
                         ) : (
-                          materials.map((material) => (
+                          textbooks.map((textbook) => (
                             <div
-                              key={material.id}
+                              key={textbook.id}
                               className="flex items-center justify-between py-2 px-3 bg-stone-50 rounded-lg group"
                             >
-                              <span className="text-sm text-stone-700">{material.name}</span>
-                              <button
-                                onClick={() => handleDeleteMaterial(material.id, material.name)}
-                                disabled={deletingMaterialId === material.id}
-                                className="opacity-0 group-hover:opacity-100 p-1 text-stone-400 hover:text-red-500 transition-all disabled:opacity-50"
-                              >
-                                {deletingMaterialId === material.id ? (
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                  <Trash2 className="w-4 h-4" />
-                                )}
-                              </button>
+                              {editingTextbookId === textbook.id ? (
+                                // 수정 모드
+                                <div className="flex-1 flex items-center gap-2">
+                                  <input
+                                    type="text"
+                                    value={editingTitle}
+                                    onChange={(e) => setEditingTitle(e.target.value)}
+                                    className="flex-1 px-2 py-1 text-sm border border-stone-200 rounded focus:outline-none focus:ring-1 focus:ring-[#6366F1]"
+                                    placeholder="교재명"
+                                  />
+                                  <input
+                                    type="number"
+                                    value={editingPages}
+                                    onChange={(e) => setEditingPages(e.target.value)}
+                                    className="w-20 px-2 py-1 text-sm border border-stone-200 rounded focus:outline-none focus:ring-1 focus:ring-[#6366F1]"
+                                    placeholder="총 페이지"
+                                  />
+                                  <button
+                                    onClick={() => saveEditTextbook(textbook.id)}
+                                    disabled={isSavingTextbook}
+                                    className="p-1 text-green-600 hover:bg-green-50 rounded transition-colors"
+                                  >
+                                    {isSavingTextbook ? (
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                      <Check className="w-4 h-4" />
+                                    )}
+                                  </button>
+                                  <button
+                                    onClick={cancelEditTextbook}
+                                    className="p-1 text-stone-400 hover:bg-stone-100 rounded transition-colors"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              ) : (
+                                // 보기 모드
+                                <>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm text-stone-700">{textbook.title}</span>
+                                    {textbook.total_pages && (
+                                      <span className="text-xs text-stone-400 bg-stone-100 px-1.5 py-0.5 rounded">
+                                        {textbook.total_pages}p
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button
+                                      onClick={() => startEditTextbook(textbook)}
+                                      className="p-1 text-stone-400 hover:text-[#6366F1] transition-colors"
+                                    >
+                                      <Pencil className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteTextbook(textbook.id, textbook.title)}
+                                      disabled={deletingTextbookId === textbook.id}
+                                      className="p-1 text-stone-400 hover:text-red-500 transition-colors disabled:opacity-50"
+                                    >
+                                      {deletingTextbookId === textbook.id ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                      ) : (
+                                        <Trash2 className="w-4 h-4" />
+                                      )}
+                                    </button>
+                                  </div>
+                                </>
+                              )}
                             </div>
                           ))
                         )}
                       </div>
                       
                       {/* 교재 추가 입력 */}
-                      <div className="flex items-center gap-2 pt-2 border-t border-stone-100">
-                        <input
-                          type="text"
-                          value={newMaterialName}
-                          onChange={(e) => setNewMaterialName(e.target.value)}
-                          onKeyDown={handleMaterialKeyDown}
-                          placeholder="교재명 입력"
-                          className="flex-1 px-3 py-2 text-sm border border-stone-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6366F1]/20 focus:border-[#6366F1]"
-                          disabled={isAddingMaterial}
-                        />
-                        <button
-                          onClick={handleAddMaterial}
-                          disabled={!newMaterialName.trim() || isAddingMaterial}
-                          className="flex items-center gap-1 px-3 py-2 text-sm font-medium text-[#6366F1] bg-[#6366F1]/10 rounded-lg hover:bg-[#6366F1]/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                        >
-                          {isAddingMaterial ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <Plus className="w-4 h-4" />
-                          )}
-                          추가
-                        </button>
+                      <div className="pt-2 border-t border-stone-100">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={newTextbookTitle}
+                            onChange={(e) => setNewTextbookTitle(e.target.value)}
+                            onKeyDown={handleTextbookKeyDown}
+                            placeholder="교재명"
+                            className="flex-1 px-3 py-2 text-sm border border-stone-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6366F1]/20 focus:border-[#6366F1]"
+                            disabled={isAddingTextbook}
+                          />
+                          <input
+                            type="number"
+                            value={newTextbookPages}
+                            onChange={(e) => setNewTextbookPages(e.target.value)}
+                            onKeyDown={handleTextbookKeyDown}
+                            placeholder="총 페이지"
+                            className="w-24 px-3 py-2 text-sm border border-stone-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6366F1]/20 focus:border-[#6366F1]"
+                            disabled={isAddingTextbook}
+                          />
+                          <button
+                            onClick={handleAddTextbook}
+                            disabled={!newTextbookTitle.trim() || isAddingTextbook}
+                            className="flex items-center gap-1 px-3 py-2 text-sm font-medium text-[#6366F1] bg-[#6366F1]/10 rounded-lg hover:bg-[#6366F1]/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          >
+                            {isAddingTextbook ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Plus className="w-4 h-4" />
+                            )}
+                            추가
+                          </button>
+                        </div>
+                        <p className="text-xs text-stone-400 mt-1.5">
+                          💡 총 페이지를 입력하면 리포트에서 진행률을 계산할 수 있어요
+                        </p>
                       </div>
                     </div>
                   )}
@@ -349,7 +467,7 @@ export default function BasicSettingsSection({
           )}
         </div>
 
-        {/* 🆕 시험 점수 */}
+        {/* 시험 점수 */}
         <div className="rounded-lg border border-stone-200 overflow-hidden">
           <div className="flex items-center justify-between py-3 px-4 bg-stone-50">
             <div className="flex items-center gap-3">
@@ -369,7 +487,7 @@ export default function BasicSettingsSection({
             />
           </div>
 
-          {/* 🆕 시험 점수 ON일 때 시험 종류 목록 */}
+          {/* 시험 점수 ON일 때 시험 종류 목록 */}
           {settings.exam_score_enabled && (
             <div className="p-4 border-t border-stone-200 bg-white">
               {/* 헤더 - 클릭하면 펼치기/접기 */}

@@ -34,6 +34,7 @@ export default function ClassesClient() {
     handleEnrollStudent,
     handleUnenrollStudent,
     handleEnrollStudentsBulk,
+    handleMoveStudent,
     handleAddSchedule,
     handleAddSchedulesBulk,
     handleRemoveSchedule,
@@ -154,11 +155,13 @@ export default function ClassesClient() {
                 schedules={classSchedules}
                 availableTeachers={availableTeachers}
                 availableStudents={availableStudents}
+                allClasses={classes.map(c => ({ id: c.id, name: c.name, color: c.color }))}
                 onClose={() => selectClass(null)}
                 onAssignTeacher={handleAssignTeacher}
                 onUnassignTeacher={handleUnassignTeacher}
                 onEnrollStudent={handleEnrollStudent}
                 onUnenrollStudent={handleUnenrollStudent}
+                onMoveStudent={handleMoveStudent}
                 onEnrollStudentsBulk={handleEnrollStudentsBulk}
                 onAddSchedulesBulk={handleAddSchedulesBulk}
                 onRemoveSchedule={handleRemoveSchedule}

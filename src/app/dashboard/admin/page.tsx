@@ -4,8 +4,9 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Users, FileText, Calendar, UserX } from 'lucide-react';
+import { Users, FileText, Calendar, UserX, ArrowRightLeft } from 'lucide-react';
 import type { Database }from '@/lib/supabase/types';
+import { getRecentClassTransfers, type RecentClassTransfer } from './students/actions/student.actions';
 
 interface TodayAbsent {
   studentId: string;
@@ -33,6 +34,7 @@ export default function AdminDashboard() {
   });
   const [todayAbsents, setTodayAbsents] = useState<TodayAbsent[]>([]);
   const [pendingMakeupList, setPendingMakeupList] = useState<PendingMakeup[]>([]);
+  const [recentTransfers, setRecentTransfers] = useState<RecentClassTransfer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const supabase = createBrowserClient<Database>(
@@ -158,6 +160,12 @@ export default function AdminDashboard() {
         absenceDate: m.absence_date,
         reason: m.absence_reason || '-',
       })));
+    }
+
+    // 최근 반 이동 조회
+    const transfersResult = await getRecentClassTransfers(7);
+    if (transfersResult.ok && transfersResult.data) {
+      setRecentTransfers(transfersResult.data);
     }
 
     setIsLoading(false);
@@ -354,13 +362,55 @@ export default function AdminDashboard() {
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle>최근 활동</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <ArrowRightLeft className="h-5 w-5 text-[#6366F1]" />
+              최근 반 이동
+            </CardTitle>
+            {recentTransfers.length > 5 && (
+              <button 
+                onClick={() => router.push('/dashboard/admin/students')}
+                className="text-sm text-[#6366F1] hover:underline"
+              >
+                전체 보기 →
+              </button>
+            )}
           </CardHeader>
           <CardContent>
-            <div className="text-sm text-gray-600">
-              최근 활동 내역이 여기에 표시됩니다.
-            </div>
+            {isLoading ? (
+              <div className="text-sm text-gray-500">로딩중...</div>
+            ) : recentTransfers.length === 0 ? (
+              <div className="text-sm text-gray-500">최근 7일간 반 이동이 없습니다 ✓</div>
+            ) : (
+              <div className="space-y-2">
+                {recentTransfers.slice(0, 5).map((transfer) => (
+                  <div 
+                    key={transfer.id} 
+                    className="flex items-center justify-between p-2 bg-gray-50 rounded-lg"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{transfer.studentName}</span>
+                      <span 
+                        className="px-2 py-0.5 text-xs rounded-full text-white"
+                        style={{ backgroundColor: transfer.fromClassColor }}
+                      >
+                        {transfer.fromClassName}
+                      </span>
+                      <span className="text-gray-400">→</span>
+                      <span 
+                        className="px-2 py-0.5 text-xs rounded-full text-white"
+                        style={{ backgroundColor: transfer.toClassColor }}
+                      >
+                        {transfer.toClassName}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {formatDate(transfer.date)} · {transfer.changedByName}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

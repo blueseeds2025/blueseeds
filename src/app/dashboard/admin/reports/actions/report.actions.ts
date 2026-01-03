@@ -238,9 +238,25 @@ export async function getStudentsForReport(classId?: string): Promise<ActionResu
     }
     
     if (classId) {
-      // 특정 반의 학생들
+      // 특정 반의 학생들 (enrollment_schedule_assignments 기준)
+      // 1. 해당 반의 스케줄 ID들 조회
+      const { data: schedules } = await supabase
+        .from('class_schedules')
+        .select('id')
+        .eq('tenant_id', profile.tenant_id)
+        .eq('class_id', classId)
+        .eq('is_active', true)
+        .is('deleted_at', null);
+
+      if (!schedules || schedules.length === 0) {
+        return { ok: true, data: [] };
+      }
+
+      const scheduleIds = schedules.map(s => s.id);
+
+      // 2. 해당 스케줄에 배정된 학생들 조회
       const { data, error } = await supabase
-        .from('class_members')
+        .from('enrollment_schedule_assignments')
         .select(`
           student_id,
           students (
@@ -250,24 +266,27 @@ export async function getStudentsForReport(classId?: string): Promise<ActionResu
           )
         `)
         .eq('tenant_id', profile.tenant_id)
-        .eq('class_id', classId)
-        .eq('is_active', true)
+        .in('class_schedule_id', scheduleIds)
+        .is('end_date', null)
         .is('deleted_at', null);
       
       if (error) throw error;
       
-      const students: StudentBasic[] = (data || [])
-        .filter(item => item.students)
-        .map(item => {
-          const s = item.students as { id: string; name: string; display_code: string | null };
-          return {
-            id: s.id,
-            name: s.name,
-            display_code: s.display_code,
-          };
+      // 3. 학생별 중복 제거
+      const studentMap = new Map<string, StudentBasic>();
+      for (const item of data || []) {
+        if (!item.students || !item.student_id) continue;
+        if (studentMap.has(item.student_id)) continue;
+        
+        const s = item.students as { id: string; name: string; display_code: string | null };
+        studentMap.set(item.student_id, {
+          id: s.id,
+          name: s.name,
+          display_code: s.display_code,
         });
+      }
       
-      return { ok: true, data: students };
+      return { ok: true, data: Array.from(studentMap.values()) };
     } else {
       // 전체 학생 (owner만)
       if (profile.role !== 'owner' && profile.role !== 'admin') {
@@ -757,19 +776,34 @@ export async function generateBulkWeeklyReports(params: {
     
     const studentMap = new Map((students || []).map(s => [s.id, s]));
     
-    // 5. teacher인 경우 담당 학생 필터링
+    // 5. teacher인 경우 담당 학생 필터링 (enrollment_schedule_assignments 기준)
     let validStudentIds = studentIds;
     if (allowedClassIds) {
-      const { data: allowedMembers } = await supabase
-        .from('class_members')
-        .select('student_id')
+      // 해당 반들의 스케줄 조회
+      const { data: allowedSchedules } = await supabase
+        .from('class_schedules')
+        .select('id')
         .eq('tenant_id', profile.tenant_id)
         .in('class_id', allowedClassIds)
         .eq('is_active', true)
         .is('deleted_at', null);
-      
-      const allowedStudentIds = new Set((allowedMembers || []).map(m => m.student_id));
-      validStudentIds = studentIds.filter(id => allowedStudentIds.has(id));
+
+      if (allowedSchedules && allowedSchedules.length > 0) {
+        const scheduleIds = allowedSchedules.map(s => s.id);
+        
+        const { data: allowedAssignments } = await supabase
+          .from('enrollment_schedule_assignments')
+          .select('student_id')
+          .eq('tenant_id', profile.tenant_id)
+          .in('class_schedule_id', scheduleIds)
+          .is('end_date', null)
+          .is('deleted_at', null);
+        
+        const allowedStudentIds = new Set((allowedAssignments || []).map(a => a.student_id));
+        validStudentIds = studentIds.filter(id => allowedStudentIds.has(id));
+      } else {
+        validStudentIds = [];
+      }
     }
     
     // 6. 옵션 정보 일괄 조회 (공통)

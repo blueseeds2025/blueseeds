@@ -5,6 +5,8 @@ import {
   StudentCardData, 
   FeedOptionSet,
   ExamType,
+  Textbook,
+  ProgressEntry,
   AttendanceStatus,
   AbsenceReason,
   TenantSettings,
@@ -34,7 +36,9 @@ import {
 interface StudentCardProps {
   data: StudentCardData;
   optionSets: FeedOptionSet[];
-  examTypes: ExamType[];  // 🆕 추가
+  examTypes: ExamType[];
+  textbooks: Textbook[];  // 🆕 추가
+  previousProgressEntries: ProgressEntry[];  // 🆕 추가
   tenantSettings: TenantSettings;
   memoFields: MemoField[];
   onOpenOptionPicker: (studentId: string, setId: string, anchorEl: HTMLElement) => void;
@@ -42,8 +46,10 @@ interface StudentCardProps {
   onNotifyParentChange: (studentId: string, notify: boolean) => void;
   onNeedsMakeupChange: (studentId: string, needsMakeup: boolean) => void;
   onProgressChange: (studentId: string, progress: string) => void;
+  onProgressEntriesChange: (studentId: string, entries: ProgressEntry[]) => void;  // 🆕 추가
+  onApplyProgressToAll?: (studentId: string, entries: ProgressEntry[]) => void;  // 🆕 진도 반 전체 적용
   onMemoChange: (studentId: string, fieldId: string, value: string) => void;
-  onExamScoreChange: (studentId: string, setId: string, score: number | null) => void;  // 🆕 추가
+  onExamScoreChange: (studentId: string, setId: string, score: number | null) => void;
   onSave: (studentId: string) => Promise<void>;
   onSendNotify?: (studentId: string) => Promise<void>;
   isSaving: boolean;
@@ -53,7 +59,9 @@ interface StudentCardProps {
 export default function StudentCard({
   data,
   optionSets,
-  examTypes,  // 🆕 추가
+  examTypes,
+  textbooks,  // 🆕 추가
+  previousProgressEntries,  // 🆕 추가
   tenantSettings,
   memoFields,
   onOpenOptionPicker,
@@ -61,8 +69,10 @@ export default function StudentCard({
   onNotifyParentChange,
   onNeedsMakeupChange,
   onProgressChange,
+  onProgressEntriesChange,  // 🆕 추가
+  onApplyProgressToAll,  // 🆕 진도 반 전체 적용
   onMemoChange,
-  onExamScoreChange,  // 🆕 추가
+  onExamScoreChange,
   onSave,
   onSendNotify,
   isSaving,
@@ -169,9 +179,14 @@ export default function StudentCard({
           {tenantSettings.progress_enabled && !isAbsent && (
             <ProgressSection
               studentId={data.studentId}
-              progressText={data.progressText}
-              previousProgress={data.previousProgress}
-              onProgressChange={onProgressChange}
+              textbooks={textbooks}
+              progressEntries={data.progressEntries}
+              previousEntries={previousProgressEntries}
+              onProgressChange={onProgressEntriesChange}
+              onApplyToAll={onApplyProgressToAll 
+                ? (entries) => onApplyProgressToAll(data.studentId, entries) 
+                : undefined
+              }
             />
           )}
           

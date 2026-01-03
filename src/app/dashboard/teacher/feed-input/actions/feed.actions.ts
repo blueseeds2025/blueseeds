@@ -3,11 +3,16 @@ export {
   getTeacherClasses,
   getClassStudents,
   getFeedOptionSets,
-  getExamTypes,  // 🆕 추가
+  getExamTypes,
   getSavedFeeds,
   getTenantSettings,
   getPreviousProgress,
   getPreviousProgressBatch,
+  // 🆕 교재별 진도 관련
+  getTextbooksForFeed,
+  getPreviousProgressEntries,
+  getPreviousProgressEntriesBatch,
+  getSavedProgressEntries,
 } from './feed-query.actions';
 
 // 저장

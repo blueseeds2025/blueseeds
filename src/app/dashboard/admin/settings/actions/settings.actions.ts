@@ -826,3 +826,202 @@ export async function deleteExamType(
     return { ok: false, message: '서버 오류가 발생했습니다' };
   }
 }
+
+// ============================================================================
+// 8. 교재 관리 (Textbooks) - 진도 입력용
+// ============================================================================
+
+export interface Textbook {
+  id: string;
+  tenant_id: string;
+  title: string;
+  total_pages: number | null;
+  display_order: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+/**
+ * 교재 목록 조회 (진도 입력용)
+ */
+export async function getTextbooks(): Promise<ActionResult<Textbook[]>> {
+  try {
+    const ctx = await getAuthContext();
+    if ('error' in ctx) {
+      return { ok: false, message: ctx.error };
+    }
+    const { supabase, profile } = ctx;
+
+    const { data, error } = await supabase
+      .from('textbooks')
+      .select('id, tenant_id, title, total_pages, display_order, is_active, created_at')
+      .eq('tenant_id', profile.tenant_id)
+      .is('deleted_at', null)
+      .eq('is_active', true)
+      .order('display_order', { ascending: true })
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('getTextbooks error:', error);
+      return { ok: false, message: '교재 목록을 불러오는데 실패했습니다' };
+    }
+
+    return { ok: true, data: (data || []) as Textbook[] };
+  } catch (error) {
+    console.error('getTextbooks exception:', error);
+    return { ok: false, message: '서버 오류가 발생했습니다' };
+  }
+}
+
+/**
+ * 교재 추가 (진도 입력용)
+ */
+export async function createTextbook(
+  title: string,
+  totalPages?: number
+): Promise<ActionResult<Textbook>> {
+  try {
+    const ctx = await getAuthContext();
+    if ('error' in ctx) {
+      return { ok: false, message: ctx.error };
+    }
+    const { supabase, profile } = ctx;
+
+    // 이름 중복 체크
+    const { data: existing } = await supabase
+      .from('textbooks')
+      .select('id')
+      .eq('tenant_id', profile.tenant_id)
+      .eq('title', title.trim())
+      .is('deleted_at', null)
+      .single();
+
+    if (existing) {
+      return { ok: false, message: '이미 등록된 교재명입니다' };
+    }
+
+    // 마지막 display_order 가져오기
+    const { data: lastItem } = await supabase
+      .from('textbooks')
+      .select('display_order')
+      .eq('tenant_id', profile.tenant_id)
+      .is('deleted_at', null)
+      .order('display_order', { ascending: false })
+      .limit(1)
+      .single();
+
+    const nextOrder = (lastItem?.display_order ?? -1) + 1;
+
+    const { data, error } = await supabase
+      .from('textbooks')
+      .insert({
+        tenant_id: profile.tenant_id,
+        title: title.trim(),
+        total_pages: totalPages || null,
+        display_order: nextOrder,
+      })
+      .select('id, tenant_id, title, total_pages, display_order, is_active, created_at')
+      .single();
+
+    if (error) {
+      console.error('createTextbook error:', error);
+      return { ok: false, message: '교재 추가에 실패했습니다' };
+    }
+
+    revalidatePath('/dashboard/admin/settings');
+    return { ok: true, data: data as Textbook };
+  } catch (error) {
+    console.error('createTextbook exception:', error);
+    return { ok: false, message: '서버 오류가 발생했습니다' };
+  }
+}
+
+/**
+ * 교재 수정 (총 페이지 수정 등)
+ */
+export async function updateTextbook(
+  textbookId: string,
+  updates: { title?: string; total_pages?: number | null }
+): Promise<ActionResult<Textbook>> {
+  try {
+    const ctx = await getAuthContext();
+    if ('error' in ctx) {
+      return { ok: false, message: ctx.error };
+    }
+    const { supabase, profile } = ctx;
+
+    // 이름 변경 시 중복 체크
+    if (updates.title) {
+      const { data: existing } = await supabase
+        .from('textbooks')
+        .select('id')
+        .eq('tenant_id', profile.tenant_id)
+        .eq('title', updates.title.trim())
+        .neq('id', textbookId)
+        .is('deleted_at', null)
+        .single();
+
+      if (existing) {
+        return { ok: false, message: '이미 등록된 교재명입니다' };
+      }
+    }
+
+    const { data, error } = await supabase
+      .from('textbooks')
+      .update({
+        ...(updates.title && { title: updates.title.trim() }),
+        ...(updates.total_pages !== undefined && { total_pages: updates.total_pages }),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', textbookId)
+      .eq('tenant_id', profile.tenant_id)
+      .select('id, tenant_id, title, total_pages, display_order, is_active, created_at')
+      .single();
+
+    if (error) {
+      console.error('updateTextbook error:', error);
+      return { ok: false, message: '교재 수정에 실패했습니다' };
+    }
+
+    revalidatePath('/dashboard/admin/settings');
+    return { ok: true, data: data as Textbook };
+  } catch (error) {
+    console.error('updateTextbook exception:', error);
+    return { ok: false, message: '서버 오류가 발생했습니다' };
+  }
+}
+
+/**
+ * 교재 삭제 (soft delete)
+ */
+export async function deleteTextbook(
+  textbookId: string
+): Promise<ActionResult<{ success: boolean }>> {
+  try {
+    const ctx = await getAuthContext();
+    if ('error' in ctx) {
+      return { ok: false, message: ctx.error };
+    }
+    const { supabase, profile } = ctx;
+
+    const { error } = await supabase
+      .from('textbooks')
+      .update({
+        deleted_at: new Date().toISOString(),
+        is_active: false,
+      })
+      .eq('id', textbookId)
+      .eq('tenant_id', profile.tenant_id);
+
+    if (error) {
+      console.error('deleteTextbook error:', error);
+      return { ok: false, message: '교재 삭제에 실패했습니다' };
+    }
+
+    revalidatePath('/dashboard/admin/settings');
+    return { ok: true, data: { success: true } };
+  } catch (error) {
+    console.error('deleteTextbook exception:', error);
+    return { ok: false, message: '서버 오류가 발생했습니다' };
+  }
+}

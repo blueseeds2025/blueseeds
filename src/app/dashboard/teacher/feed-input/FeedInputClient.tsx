@@ -6,7 +6,7 @@ import StudentCard from './components/StudentCard';
 import FeedOptionPicker from './components/FeedOptionPicker';
 import { useFeedInput } from './hooks/useFeedInput';
 import { formatDisplayDate, getGridClass, calculateGridColumns } from './constants';
-import { FeedOption, AttendanceStatus } from './types';
+import { FeedOption, AttendanceStatus, ProgressEntry } from './types';
 
 interface FeedInputClientProps {
   initialClasses: { id: string; name: string }[];
@@ -57,8 +57,10 @@ export default function FeedInputClient({
     students,
     cardDataMap,
     optionSets,
-    examTypes,  // 🆕 추가
+    examTypes,
+    textbooks,  // 🆕 추가
     tenantSettings,
+    previousProgressEntriesMap,  // 🆕 추가
     memoFields,
     isLoading,
     isSaving,
@@ -69,9 +71,11 @@ export default function FeedInputClient({
     handleNotifyParentChange,
     handleNeedsMakeupChange,
     handleProgressChange,
+    handleProgressEntriesChange,  // 🆕 추가
+    handleApplyProgressToAll,  // 🆕 진도 반 전체 적용
     handleMemoChange,
     handleFeedValueChange,
-    handleExamScoreChange,  // 🆕 추가
+    handleExamScoreChange,
     handleSave,
     handleSaveAll,
     addMemoField,
@@ -616,7 +620,9 @@ export default function FeedInputClient({
                     key={student.id}
                     data={cardData}
                     optionSets={optionSets}
-                    examTypes={examTypes}  // 🆕 추가
+                    examTypes={examTypes}
+                    textbooks={textbooks}  // 🆕 추가
+                    previousProgressEntries={previousProgressEntriesMap[student.id] || []}  // 🆕 추가
                     tenantSettings={tenantSettings}
                     memoFields={memoFields}
                     onOpenOptionPicker={openOptionPicker}
@@ -624,8 +630,10 @@ export default function FeedInputClient({
                     onNotifyParentChange={handleNotifyParentChange}
                     onNeedsMakeupChange={handleNeedsMakeupChange}
                     onProgressChange={handleProgressChange}
+                    onProgressEntriesChange={handleProgressEntriesChange}  // 🆕 추가
+                    onApplyProgressToAll={students.length > 1 ? handleApplyProgressToAll : undefined}  // 🆕 2명 이상일 때만
                     onMemoChange={handleMemoChange}
-                    onExamScoreChange={handleExamScoreChange}  // 🆕 추가
+                    onExamScoreChange={handleExamScoreChange}
                     onSave={handleSave}
                     isSaving={savingStudentId === student.id}
                   />

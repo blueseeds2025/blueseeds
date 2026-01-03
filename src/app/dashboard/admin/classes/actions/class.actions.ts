@@ -102,19 +102,44 @@ export async function getClassCounts(): Promise<{
     }
   }
 
-  // 학생 카운트 (class_members 기반)
-  const { data: studentData } = await sb
-    .from('class_members')
-    .select('class_id')
+  // 학생 카운트 (enrollment_schedule_assignments 기준)
+  // 1. 모든 스케줄 조회
+  const { data: allSchedules } = await sb
+    .from('class_schedules')
+    .select('id, class_id')
     .eq('tenant_id', tenantId)
     .eq('is_active', true)
     .is('deleted_at', null);
 
-  const studentCounts: Record<string, number> = {};
-  for (const s of studentData ?? []) {
+  const scheduleToClass: Record<string, string> = {};
+  for (const s of allSchedules ?? []) {
     if (s.class_id) {
-      studentCounts[s.class_id] = (studentCounts[s.class_id] || 0) + 1;
+      scheduleToClass[s.id] = s.class_id;
     }
+  }
+
+  // 2. 활성 배정에서 학생 카운트 (반별 distinct)
+  const { data: assignmentData } = await sb
+    .from('enrollment_schedule_assignments')
+    .select('student_id, class_schedule_id')
+    .eq('tenant_id', tenantId)
+    .is('end_date', null)
+    .is('deleted_at', null);
+
+  const studentsByClass: Record<string, Set<string>> = {};
+  for (const a of assignmentData ?? []) {
+    const classId = scheduleToClass[a.class_schedule_id];
+    if (classId && a.student_id) {
+      if (!studentsByClass[classId]) {
+        studentsByClass[classId] = new Set();
+      }
+      studentsByClass[classId].add(a.student_id);
+    }
+  }
+
+  const studentCounts: Record<string, number> = {};
+  for (const [classId, students] of Object.entries(studentsByClass)) {
+    studentCounts[classId] = students.size;
   }
 
   // 스케줄 조회 (class_schedules 기반)
@@ -290,7 +315,26 @@ export async function deleteClass(classId: string): Promise<ActionResult> {
       .eq('tenant_id', tenantId)
       .eq('class_id', classId);
 
-    // 관련 학생 등록도 비활성화 (tenant_id 필터 추가)
+    // 관련 스케줄의 학생 배정 종료 (enrollment_schedule_assignments)
+    const { data: classSchedules } = await sb
+      .from('class_schedules')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('class_id', classId);
+
+    if (classSchedules && classSchedules.length > 0) {
+      const scheduleIds = classSchedules.map(s => s.id);
+      const today = new Date().toISOString().split('T')[0];
+      
+      await sb
+        .from('enrollment_schedule_assignments')
+        .update({ end_date: today, updated_at: new Date().toISOString() })
+        .eq('tenant_id', tenantId)
+        .in('class_schedule_id', scheduleIds)
+        .is('end_date', null);
+    }
+
+    // 레거시: class_members도 비활성화 (하위 호환)
     await sb
       .from('class_members')
       .update({ is_active: false, deleted_at: new Date().toISOString() })
@@ -471,15 +515,34 @@ export async function getClassMembers(classId: string): Promise<ClassMember[]> {
   const sb = await supabaseServer();
   const { tenantId } = await getTenantIdOrThrow(sb);
 
-  const { data, error } = await sb
-    .from('class_members')
-    .select(`
-      *,
-      student:students!class_members_student_id_fkey(id, name, display_code)
-    `)
-    .eq('class_id', classId)
+  // 1. 해당 반의 스케줄 ID들 조회
+  const { data: schedules } = await sb
+    .from('class_schedules')
+    .select('id')
     .eq('tenant_id', tenantId)
+    .eq('class_id', classId)
     .eq('is_active', true)
+    .is('deleted_at', null);
+
+  if (!schedules || schedules.length === 0) {
+    return [];
+  }
+
+  const scheduleIds = schedules.map(s => s.id);
+
+  // 2. 해당 스케줄에 배정된 학생들 조회 (중복 제거)
+  const { data, error } = await sb
+    .from('enrollment_schedule_assignments')
+    .select(`
+      id,
+      student_id,
+      class_schedule_id,
+      start_date,
+      students (id, name, display_code)
+    `)
+    .eq('tenant_id', tenantId)
+    .in('class_schedule_id', scheduleIds)
+    .is('end_date', null)
     .is('deleted_at', null);
 
   if (error) {
@@ -487,7 +550,31 @@ export async function getClassMembers(classId: string): Promise<ClassMember[]> {
     throw error;
   }
 
-  return (data ?? []) as ClassMember[];
+  // 3. 학생별로 중복 제거 (한 학생이 여러 스케줄에 있을 수 있음)
+  const studentMap = new Map<string, ClassMember>();
+  
+  for (const row of data ?? []) {
+    if (!row.student_id || studentMap.has(row.student_id)) continue;
+    
+    const student = row.students as { id: string; name: string; display_code: string | null } | null;
+    if (!student) continue;
+
+    studentMap.set(row.student_id, {
+      id: row.id,  // assignment id
+      tenant_id: tenantId,
+      class_id: classId,
+      student_id: row.student_id,
+      is_active: true,
+      enrolled_at: row.start_date,
+      student: {
+        id: student.id,
+        name: student.name,
+        display_code: student.display_code ?? '',
+      },
+    } as ClassMember);
+  }
+
+  return Array.from(studentMap.values());
 }
 
 /** 등록 가능한 학생 목록 (특정 반에 미등록된 학생) */
@@ -495,25 +582,39 @@ export async function getAvailableStudents(classId: string): Promise<{ id: strin
   const sb = await supabaseServer();
   const { tenantId } = await getTenantIdOrThrow(sb);
 
-  // 이미 등록된 학생 ID 목록 (tenant_id 필터 추가)
-  const { data: enrolled } = await sb
-    .from('class_members')
-    .select('student_id')
+  // 1. 해당 반의 스케줄 ID들 조회
+  const { data: schedules } = await sb
+    .from('class_schedules')
+    .select('id')
     .eq('tenant_id', tenantId)
     .eq('class_id', classId)
     .eq('is_active', true)
     .is('deleted_at', null);
 
-  const enrolledIds = (enrolled ?? []).map((e) => e.student_id);
+  let enrolledIds: string[] = [];
 
-  // 전체 학생 중 미등록 학생
+  if (schedules && schedules.length > 0) {
+    const scheduleIds = schedules.map(s => s.id);
+
+    // 2. 해당 스케줄에 이미 배정된 학생 ID들
+    const { data: enrolled } = await sb
+      .from('enrollment_schedule_assignments')
+      .select('student_id')
+      .eq('tenant_id', tenantId)
+      .in('class_schedule_id', scheduleIds)
+      .is('end_date', null)
+      .is('deleted_at', null);
+
+    enrolledIds = [...new Set((enrolled ?? []).map((e) => e.student_id).filter((id): id is string => !!id))];
+  }
+
+  // 3. 전체 학생 중 미등록 학생
   let query = sb
     .from('students')
     .select('id, name, display_code')
     .eq('tenant_id', tenantId)
     .is('deleted_at', null);
 
-  // UUID 필터 수정: 따옴표 추가
   if (enrolledIds.length > 0) {
     const inList = enrolledIds.map((id) => `"${id}"`).join(',');
     query = query.not('id', 'in', `(${inList})`);
@@ -533,62 +634,70 @@ export async function getAvailableStudents(classId: string): Promise<{ id: strin
 export async function enrollStudent(classId: string, studentId: string): Promise<ActionResult> {
   try {
     const sb = await supabaseServer();
-    const { tenantId, role } = await getTenantIdOrThrow(sb);
+    const { tenantId, role, userId } = await getTenantIdOrThrow(sb);
 
     if (role !== 'owner') {
       return { ok: false, message: '학생 등록 권한이 없습니다' };
     }
 
-    // 이미 등록되어 있는지 확인 (비활성 포함)
-    const { data: existing } = await sb
-      .from('class_members')
-      .select('id, is_active')
+    // 1. 해당 반의 모든 스케줄 조회
+    const { data: schedules } = await sb
+      .from('class_schedules')
+      .select('id')
       .eq('tenant_id', tenantId)
       .eq('class_id', classId)
-      .eq('student_id', studentId)
-      .is('deleted_at', null)
-      .maybeSingle();
+      .eq('is_active', true)
+      .is('deleted_at', null);
 
-    // 활성 상태로 이미 있으면 에러
-    if (existing?.is_active) {
+    if (!schedules || schedules.length === 0) {
+      return { ok: false, message: '해당 반에 스케줄이 없습니다. 먼저 시간표를 설정해주세요.' };
+    }
+
+    const scheduleIds = schedules.map(s => s.id);
+
+    // 2. 이미 배정되어 있는지 확인
+    const { data: existing } = await sb
+      .from('enrollment_schedule_assignments')
+      .select('id, class_schedule_id, end_date')
+      .eq('tenant_id', tenantId)
+      .eq('student_id', studentId)
+      .in('class_schedule_id', scheduleIds)
+      .is('deleted_at', null);
+
+    const activeAssignments = (existing ?? []).filter(e => !e.end_date);
+    
+    if (activeAssignments.length > 0) {
       return { ok: false, message: '이미 등록된 학생입니다' };
     }
 
-    // 비활성 상태로 있으면 재활성화
-    if (existing && !existing.is_active) {
-      const { error: updateError } = await sb
-        .from('class_members')
-        .update({
-          is_active: true,
-          enrolled_at: new Date().toISOString(),
-          deleted_at: null,
-        })
-        .eq('id', existing.id)
-        .eq('tenant_id', tenantId);
+    // 3. 종료된 배정이 있으면 재활성화, 없으면 새로 생성
+    const today = new Date().toISOString().split('T')[0];
+    const existingScheduleIds = new Set((existing ?? []).map(e => e.class_schedule_id));
 
-      if (updateError) {
-        console.error('[enrollStudent] reactivate error:', updateError);
-        return { ok: false, message: updateError.message };
+    for (const scheduleId of scheduleIds) {
+      const endedAssignment = (existing ?? []).find(e => e.class_schedule_id === scheduleId && e.end_date);
+      
+      if (endedAssignment) {
+        // 재활성화
+        await sb
+          .from('enrollment_schedule_assignments')
+          .update({
+            end_date: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', endedAssignment.id);
+      } else if (!existingScheduleIds.has(scheduleId)) {
+        // 새로 생성
+        await sb
+          .from('enrollment_schedule_assignments')
+          .insert({
+            tenant_id: tenantId,
+            student_id: studentId,
+            class_schedule_id: scheduleId,
+            start_date: today,
+            created_by: userId,
+          });
       }
-
-      revalidatePath('/dashboard/admin/classes');
-      return { ok: true };
-    }
-
-    // 새로 생성
-    const { error } = await sb
-      .from('class_members')
-      .insert({
-        tenant_id: tenantId,
-        class_id: classId,
-        student_id: studentId,
-        is_active: true,
-        enrolled_at: new Date().toISOString(),
-      });
-
-    if (error) {
-      console.error('[enrollStudent] error:', error);
-      return { ok: false, message: error.message };
     }
 
     revalidatePath('/dashboard/admin/classes');
@@ -609,15 +718,33 @@ export async function unenrollStudent(classId: string, studentId: string): Promi
       return { ok: false, message: '학생 등록 해제 권한이 없습니다' };
     }
 
-    const { error } = await sb
-      .from('class_members')
-      .update({
-        is_active: false,
-        deleted_at: new Date().toISOString(),
-      })
+    // 1. 해당 반의 모든 스케줄 조회
+    const { data: schedules } = await sb
+      .from('class_schedules')
+      .select('id')
+      .eq('tenant_id', tenantId)
       .eq('class_id', classId)
+      .eq('is_active', true)
+      .is('deleted_at', null);
+
+    if (!schedules || schedules.length === 0) {
+      return { ok: true };  // 스케줄 없으면 할 일 없음
+    }
+
+    const scheduleIds = schedules.map(s => s.id);
+    const today = new Date().toISOString().split('T')[0];
+
+    // 2. 해당 학생의 배정 종료 (end_date 설정)
+    const { error } = await sb
+      .from('enrollment_schedule_assignments')
+      .update({
+        end_date: today,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('tenant_id', tenantId)
       .eq('student_id', studentId)
-      .eq('tenant_id', tenantId);
+      .in('class_schedule_id', scheduleIds)
+      .is('end_date', null);
 
     if (error) {
       console.error('[unenrollStudent] error:', error);
@@ -650,69 +777,7 @@ export async function enrollStudentsBulk(classId: string, studentIds: string[]):
       return { ok: false, message: '등록할 학생을 선택하세요' };
     }
 
-    // 기존 레코드 조회 (활성/비활성 모두)
-    const { data: existing } = await sb
-      .from('class_members')
-      .select('student_id, is_active')
-      .eq('tenant_id', tenantId)
-      .eq('class_id', classId)
-      .is('deleted_at', null)
-      .in('student_id', studentIds);
-
-    const activeIds = new Set<string>();
-    const inactiveIds = new Set<string>();
-    
-    for (const e of existing ?? []) {
-      if (e.is_active) {
-        activeIds.add(e.student_id!);
-      } else {
-        inactiveIds.add(e.student_id!);
-      }
-    }
-
-    // 이미 활성 상태인 학생 제외
-    const toProcess = studentIds.filter((id) => !activeIds.has(id));
-
-    if (toProcess.length === 0) {
-      return { ok: false, message: '모든 학생이 이미 등록되어 있습니다' };
-    }
-
-    // 비활성 레코드 재활성화
-    const toReactivate = toProcess.filter((id) => inactiveIds.has(id));
-    if (toReactivate.length > 0) {
-      await sb
-        .from('class_members')
-        .update({
-          is_active: true,
-          enrolled_at: new Date().toISOString(),
-          deleted_at: null,
-        })
-        .eq('tenant_id', tenantId)
-        .eq('class_id', classId)
-        .in('student_id', toReactivate);
-    }
-
-    // 새로 생성할 학생
-    const toCreate = toProcess.filter((id) => !inactiveIds.has(id));
-    if (toCreate.length > 0) {
-      const rows = toCreate.map((studentId) => ({
-        tenant_id: tenantId,
-        class_id: classId,
-        student_id: studentId,
-        is_active: true,
-        enrolled_at: new Date().toISOString(),
-      }));
-
-      const { error } = await sb.from('class_members').insert(rows);
-
-      if (error) {
-        console.error('[enrollStudentsBulk] error:', error);
-        return { ok: false, message: error.message };
-      }
-    }
-
-    // ========== 스케줄에도 자동 배정 ==========
-    // 해당 반의 모든 스케줄 조회
+    // 1. 해당 반의 모든 스케줄 조회
     const { data: schedules } = await sb
       .from('class_schedules')
       .select('id')
@@ -721,58 +786,110 @@ export async function enrollStudentsBulk(classId: string, studentIds: string[]):
       .eq('is_active', true)
       .is('deleted_at', null);
 
-    if (schedules && schedules.length > 0) {
-      // 기존 스케줄 배정 조회 (중복 방지)
-      const { data: existingAssignments } = await sb
-        .from('enrollment_schedule_assignments')
-        .select('student_id, class_schedule_id')
-        .eq('tenant_id', tenantId)
-        .in('class_schedule_id', schedules.map(s => s.id))
-        .in('student_id', toProcess)
-        .is('deleted_at', null);
+    if (!schedules || schedules.length === 0) {
+      return { ok: false, message: '해당 반에 스케줄이 없습니다. 먼저 시간표를 설정해주세요.' };
+    }
 
-      const existingSet = new Set(
-        (existingAssignments || []).map(a => `${a.student_id}-${a.class_schedule_id}`)
-      );
+    const scheduleIds = schedules.map(s => s.id);
 
-      // 새로 추가할 배정
-      const assignmentRows: {
-        tenant_id: string;
-        student_id: string;
-        class_schedule_id: string;
-        start_date: string;
-        created_by: string;
-      }[] = [];
+    // 2. 기존 배정 조회 (활성/종료 모두)
+    const { data: existingAssignments } = await sb
+      .from('enrollment_schedule_assignments')
+      .select('id, student_id, class_schedule_id, end_date')
+      .eq('tenant_id', tenantId)
+      .in('class_schedule_id', scheduleIds)
+      .in('student_id', studentIds)
+      .is('deleted_at', null);
 
-      for (const studentId of toProcess) {
-        for (const schedule of schedules) {
-          const key = `${studentId}-${schedule.id}`;
-          if (!existingSet.has(key)) {
-            assignmentRows.push({
-              tenant_id: tenantId,
-              student_id: studentId,
-              class_schedule_id: schedule.id,
-              start_date: new Date().toISOString().split('T')[0],
-              created_by: userId,
-            });
-          }
-        }
+    // 학생+스케줄 조합별로 상태 파악
+    const activeSet = new Set<string>();  // 이미 활성인 조합
+    const endedMap = new Map<string, string>();  // 종료된 조합 → assignment id
+
+    for (const a of existingAssignments ?? []) {
+      const key = `${a.student_id}-${a.class_schedule_id}`;
+      if (!a.end_date) {
+        activeSet.add(key);
+      } else {
+        endedMap.set(key, a.id);
       }
+    }
 
-      if (assignmentRows.length > 0) {
-        const { error: assignError } = await sb
-          .from('enrollment_schedule_assignments')
-          .insert(assignmentRows);
+    // 3. 이미 모든 스케줄에 활성 배정된 학생 제외
+    const studentsToProcess: string[] = [];
+    for (const studentId of studentIds) {
+      const allActive = scheduleIds.every(scheduleId => 
+        activeSet.has(`${studentId}-${scheduleId}`)
+      );
+      if (!allActive) {
+        studentsToProcess.push(studentId);
+      }
+    }
 
-        if (assignError) {
-          console.error('[enrollStudentsBulk] schedule assignment error:', assignError);
-          // 실패해도 class_members는 이미 등록됨, 경고만
+    if (studentsToProcess.length === 0) {
+      return { ok: false, message: '모든 학생이 이미 등록되어 있습니다' };
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+
+    // 4. 종료된 배정 재활성화
+    const toReactivate: string[] = [];
+    for (const studentId of studentsToProcess) {
+      for (const scheduleId of scheduleIds) {
+        const key = `${studentId}-${scheduleId}`;
+        if (endedMap.has(key)) {
+          toReactivate.push(endedMap.get(key)!);
         }
       }
     }
 
+    if (toReactivate.length > 0) {
+      await sb
+        .from('enrollment_schedule_assignments')
+        .update({
+          end_date: null,
+          updated_at: new Date().toISOString(),
+        })
+        .in('id', toReactivate);
+    }
+
+    // 5. 새로 생성할 배정
+    const toCreate: {
+      tenant_id: string;
+      student_id: string;
+      class_schedule_id: string;
+      start_date: string;
+      created_by: string;
+    }[] = [];
+
+    for (const studentId of studentsToProcess) {
+      for (const scheduleId of scheduleIds) {
+        const key = `${studentId}-${scheduleId}`;
+        // 활성도 아니고 종료된 것도 없으면 새로 생성
+        if (!activeSet.has(key) && !endedMap.has(key)) {
+          toCreate.push({
+            tenant_id: tenantId,
+            student_id: studentId,
+            class_schedule_id: scheduleId,
+            start_date: today,
+            created_by: userId,
+          });
+        }
+      }
+    }
+
+    if (toCreate.length > 0) {
+      const { error } = await sb
+        .from('enrollment_schedule_assignments')
+        .insert(toCreate);
+
+      if (error) {
+        console.error('[enrollStudentsBulk] error:', error);
+        return { ok: false, message: error.message };
+      }
+    }
+
     revalidatePath('/dashboard/admin/classes');
-    return { ok: true, data: { count: toProcess.length } };
+    return { ok: true, data: { count: studentsToProcess.length } };
   } catch (e: any) {
     console.error('[enrollStudentsBulk] fatal:', e);
     return { ok: false, message: e?.message ?? '서버 오류' };

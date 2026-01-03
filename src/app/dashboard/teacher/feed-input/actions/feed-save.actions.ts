@@ -297,6 +297,39 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
         response_body: JSON.parse(JSON.stringify(response)),
       });
     
+    // ========================================
+    // 🆕 진도 저장 (feed_progress_entries)
+    // ========================================
+    if (payload.progressEntries && payload.progressEntries.length > 0 && payload.attendanceStatus !== 'absent') {
+      // 기존 진도 삭제 (soft delete)
+      await supabase
+        .from('feed_progress_entries')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('tenant_id', profile.tenant_id)
+        .eq('student_id', payload.studentId)
+        .eq('feed_date', payload.feedDate);
+      
+      // 새 진도 저장
+      const progressInserts = payload.progressEntries.map(entry => ({
+        tenant_id: profile.tenant_id,
+        student_id: payload.studentId,
+        feed_date: payload.feedDate,
+        textbook_id: entry.textbookId,
+        end_page_int: entry.endPageInt,
+        end_page_text: entry.endPageText || null,
+        created_by: user.id,
+      }));
+      
+      const { error: progressError } = await supabase
+        .from('feed_progress_entries')
+        .insert(progressInserts);
+      
+      if (progressError) {
+        console.error('feed_progress_entries insert error:', progressError);
+        // 진도 저장 실패는 전체 실패로 처리하지 않음 (피드는 저장됨)
+      }
+    }
+    
     revalidatePath('/dashboard/teacher/feed-input');
     
     return response;

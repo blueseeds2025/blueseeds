@@ -8,7 +8,9 @@ import {
   FeedOption,
   ExamType,
   SavedFeedData,
-  TenantSettings
+  TenantSettings,
+  Textbook,
+  ProgressEntry,
 } from '../types';
 
 // ============================================================================
@@ -390,6 +392,7 @@ export async function getSavedFeeds(
     if (feedsError) throw feedsError;
     
     const feedIds = (feeds || []).map(f => f.id);
+    const studentIds = (feeds || []).map(f => f.student_id).filter((id): id is string => !!id);
     const feedValuesMap: Record<string, { set_id: string | null; option_id: string | null; score: number | null }[]> = {};
     
     if (feedIds.length > 0) {
@@ -406,6 +409,50 @@ export async function getSavedFeeds(
           feedValuesMap[v.feed_id] = [];
         }
         feedValuesMap[v.feed_id].push(v);
+      }
+    }
+    
+    // 🆕 저장된 진도 데이터 조회 (feed_progress_entries)
+    const progressEntriesMap: Record<string, ProgressEntry[]> = {};
+    
+    if (studentIds.length > 0) {
+      const { data: progressData, error: progressError } = await supabase
+        .from('feed_progress_entries')
+        .select(`
+          student_id,
+          textbook_id,
+          end_page_int,
+          end_page_text,
+          textbooks (
+            id,
+            title,
+            total_pages
+          )
+        `)
+        .eq('tenant_id', profile.tenant_id)
+        .in('student_id', studentIds)
+        .eq('feed_date', feedDate)
+        .is('deleted_at', null);
+      
+      if (!progressError && progressData) {
+        for (const row of progressData) {
+          if (!row.student_id || !row.textbook_id) continue;
+          
+          const textbook = row.textbooks as { id: string; title: string; total_pages: number | null } | null;
+          if (!textbook) continue;
+          
+          if (!progressEntriesMap[row.student_id]) {
+            progressEntriesMap[row.student_id] = [];
+          }
+          
+          progressEntriesMap[row.student_id].push({
+            textbookId: textbook.id,
+            textbookTitle: textbook.title,
+            totalPages: textbook.total_pages,
+            endPageInt: row.end_page_int,
+            endPageText: row.end_page_text || '',
+          });
+        }
       }
     }
     
@@ -450,6 +497,7 @@ export async function getSavedFeeds(
         notifyParent: feed.notify_parent ?? false,
         isMakeup: feed.is_makeup ?? false,
         progressText: feed.progress_text ?? undefined,
+        progressEntries: progressEntriesMap[feed.student_id] || [],  // 🆕 저장된 진도 추가
         memoValues: (feed.memo_values as Record<string, string>) || {},
         feedValues,
         examScores,
@@ -622,5 +670,261 @@ export async function getPreviousProgressBatch(
   } catch (error) {
     console.error('getPreviousProgressBatch error:', error);
     return {};
+  }
+}
+
+// ============================================================================
+// 교재 목록 조회 (피드 입력용)
+// ============================================================================
+
+export async function getTextbooksForFeed(): Promise<{
+  success: boolean;
+  data?: Textbook[];
+  error?: string;
+}> {
+  try {
+    const supabase = await createClient();
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { success: false, error: '로그인이 필요합니다' };
+    }
+    
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('tenant_id')
+      .eq('id', user.id)
+      .single();
+    
+    if (!profile) {
+      return { success: false, error: '프로필을 찾을 수 없습니다' };
+    }
+    
+    const { data, error } = await supabase
+      .from('textbooks')
+      .select('id, title, total_pages')
+      .eq('tenant_id', profile.tenant_id)
+      .eq('is_active', true)
+      .is('deleted_at', null)
+      .order('display_order', { ascending: true });
+    
+    if (error) throw error;
+    
+    return { success: true, data: data as Textbook[] };
+  } catch (error) {
+    console.error('getTextbooksForFeed error:', error);
+    return { success: false, error: '교재 목록을 불러오는데 실패했습니다' };
+  }
+}
+
+// ============================================================================
+// 이전 진도 조회 (교재별) - feed_progress_entries 테이블
+// ============================================================================
+
+export async function getPreviousProgressEntries(
+  studentId: string,
+  currentDate: string
+): Promise<ProgressEntry[]> {
+  try {
+    const supabase = await createClient();
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
+    
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('tenant_id')
+      .eq('id', user.id)
+      .single();
+    
+    if (!profile) return [];
+    
+    // 학생의 가장 최근 진도 기록 조회 (교재별)
+    const { data, error } = await supabase
+      .from('feed_progress_entries')
+      .select(`
+        textbook_id,
+        end_page_int,
+        end_page_text,
+        feed_date,
+        textbooks (
+          id,
+          title,
+          total_pages
+        )
+      `)
+      .eq('tenant_id', profile.tenant_id)
+      .eq('student_id', studentId)
+      .lt('feed_date', currentDate)
+      .is('deleted_at', null)
+      .order('feed_date', { ascending: false });
+    
+    if (error) throw error;
+    
+    // 교재별로 가장 최근 기록만 추출
+    const latestByTextbook: Record<string, ProgressEntry> = {};
+    
+    for (const row of data || []) {
+      if (!row.textbook_id || latestByTextbook[row.textbook_id]) continue;
+      
+      const textbook = row.textbooks as { id: string; title: string; total_pages: number | null } | null;
+      if (!textbook) continue;
+      
+      latestByTextbook[row.textbook_id] = {
+        textbookId: textbook.id,
+        textbookTitle: textbook.title,
+        totalPages: textbook.total_pages,
+        endPageInt: row.end_page_int,
+        endPageText: row.end_page_text || '',
+      };
+    }
+    
+    return Object.values(latestByTextbook);
+  } catch (error) {
+    console.error('getPreviousProgressEntries error:', error);
+    return [];
+  }
+}
+
+// ============================================================================
+// 이전 진도 일괄 조회 (교재별) - 여러 학생
+// ============================================================================
+
+export async function getPreviousProgressEntriesBatch(
+  studentIds: string[],
+  currentDate: string
+): Promise<Record<string, ProgressEntry[]>> {
+  try {
+    if (studentIds.length === 0) return {};
+    
+    const supabase = await createClient();
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return {};
+    
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('tenant_id')
+      .eq('id', user.id)
+      .single();
+    
+    if (!profile) return {};
+    
+    const { data, error } = await supabase
+      .from('feed_progress_entries')
+      .select(`
+        student_id,
+        textbook_id,
+        end_page_int,
+        end_page_text,
+        feed_date,
+        textbooks (
+          id,
+          title,
+          total_pages
+        )
+      `)
+      .eq('tenant_id', profile.tenant_id)
+      .in('student_id', studentIds)
+      .lt('feed_date', currentDate)
+      .is('deleted_at', null)
+      .order('feed_date', { ascending: false });
+    
+    if (error) throw error;
+    
+    // 학생별 + 교재별로 가장 최근 기록만 추출
+    const result: Record<string, Record<string, ProgressEntry>> = {};
+    
+    for (const row of data || []) {
+      if (!row.student_id || !row.textbook_id) continue;
+      
+      if (!result[row.student_id]) {
+        result[row.student_id] = {};
+      }
+      
+      // 이미 해당 교재의 기록이 있으면 스킵 (최신 기록 유지)
+      if (result[row.student_id][row.textbook_id]) continue;
+      
+      const textbook = row.textbooks as { id: string; title: string; total_pages: number | null } | null;
+      if (!textbook) continue;
+      
+      result[row.student_id][row.textbook_id] = {
+        textbookId: textbook.id,
+        textbookTitle: textbook.title,
+        totalPages: textbook.total_pages,
+        endPageInt: row.end_page_int,
+        endPageText: row.end_page_text || '',
+      };
+    }
+    
+    // Record<string, ProgressEntry[]> 형태로 변환
+    const finalResult: Record<string, ProgressEntry[]> = {};
+    for (const [studentId, textbookMap] of Object.entries(result)) {
+      finalResult[studentId] = Object.values(textbookMap);
+    }
+    
+    return finalResult;
+  } catch (error) {
+    console.error('getPreviousProgressEntriesBatch error:', error);
+    return {};
+  }
+}
+
+// ============================================================================
+// 저장된 진도 조회 (교재별) - 특정 날짜
+// ============================================================================
+
+export async function getSavedProgressEntries(
+  studentId: string,
+  feedDate: string
+): Promise<ProgressEntry[]> {
+  try {
+    const supabase = await createClient();
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
+    
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('tenant_id')
+      .eq('id', user.id)
+      .single();
+    
+    if (!profile) return [];
+    
+    const { data, error } = await supabase
+      .from('feed_progress_entries')
+      .select(`
+        textbook_id,
+        end_page_int,
+        end_page_text,
+        textbooks (
+          id,
+          title,
+          total_pages
+        )
+      `)
+      .eq('tenant_id', profile.tenant_id)
+      .eq('student_id', studentId)
+      .eq('feed_date', feedDate)
+      .is('deleted_at', null);
+    
+    if (error) throw error;
+    
+    return (data || [])
+      .filter(row => row.textbooks)
+      .map(row => {
+        const textbook = row.textbooks as { id: string; title: string; total_pages: number | null };
+        return {
+          textbookId: textbook.id,
+          textbookTitle: textbook.title,
+          totalPages: textbook.total_pages,
+          endPageInt: row.end_page_int,
+          endPageText: row.end_page_text || '',
+        };
+      });
+  } catch (error) {
+    console.error('getSavedProgressEntries error:', error);
+    return [];
   }
 }

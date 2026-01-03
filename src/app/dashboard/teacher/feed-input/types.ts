@@ -67,6 +67,22 @@ export interface MaterialUsage {
   quantity: number;
 }
 
+// 🆕 교재 정보 (진도 입력용)
+export interface Textbook {
+  id: string;
+  title: string;
+  total_pages: number | null;
+}
+
+// 🆕 진도 입력 항목 (교재별)
+export interface ProgressEntry {
+  textbookId: string;
+  textbookTitle: string;
+  totalPages: number | null;
+  endPageInt: number | null;
+  endPageText: string;
+}
+
 // 🆕 시험 점수 값
 export interface ExamScoreValue {
   setId: string;
@@ -82,6 +98,7 @@ export interface SavedFeedData {
   notifyParent: boolean;
   isMakeup: boolean;
   progressText?: string;
+  progressEntries?: ProgressEntry[];  // 🆕 저장된 교재별 진도
   memoValues: Record<string, string>;
   feedValues: {
     setId: string;
@@ -106,8 +123,9 @@ export interface StudentCardData {
   needsMakeup?: boolean;
   
   // 진도
-  progressText?: string;
+  progressText?: string;  // 기존 (하위호환)
   previousProgress?: string;
+  progressEntries: ProgressEntry[];  // 🆕 교재별 진도
   
   // 피드 항목별 값
   feedValues: Record<string, string | null>;
@@ -152,7 +170,8 @@ export interface SaveFeedPayload {
   sessionType: SessionType;
   makeupTicketId?: string;  // 보강 시 연결할 티켓 ID
   
-  progressText?: string;
+  progressText?: string;  // 기존 (하위호환)
+  progressEntries?: ProgressEntry[];  // 🆕 교재별 진도
   memoValues?: Record<string, string>;
   
   feedValues: {

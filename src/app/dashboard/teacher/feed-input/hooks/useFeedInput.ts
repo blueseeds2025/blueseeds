@@ -4,14 +4,16 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   ClassStudent,
   FeedOptionSet,
-  ExamType,  // 🆕 추가
+  ExamType,
   TenantSettings,
+  Textbook,  // 🆕 추가
 } from '../types';
 import {
   getTeacherClasses,
   getFeedOptionSets,
-  getExamTypes,  // 🆕 추가
+  getExamTypes,
   getTenantSettings,
+  getTextbooksForFeed,  // 🆕 추가
   searchMakeupStudents,
 } from '../actions/feed.actions';
 import { toast } from 'sonner';
@@ -32,7 +34,8 @@ interface UseFeedInputProps {
 export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInputProps) {
   // 공통 설정
   const [optionSets, setOptionSets] = useState<FeedOptionSet[]>([]);
-  const [examTypes, setExamTypes] = useState<ExamType[]>([]);  // 🆕 추가
+  const [examTypes, setExamTypes] = useState<ExamType[]>([]);
+  const [textbooks, setTextbooks] = useState<Textbook[]>([]);  // 🆕 추가
   const [tenantSettings, setTenantSettings] = useState<TenantSettings>({
     progress_enabled: false,
     materials_enabled: false,
@@ -51,21 +54,24 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
   
   // 보강 티켓 맵 (정규/보강 훅에서 공유)
   const [makeupTicketMap, setMakeupTicketMap] = useState<Record<string, string>>({});
+  
+  // 🆕 설정 로드 완료 플래그
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
 
   // 옵션 세트 및 테넌트 설정 로드
   useEffect(() => {
     async function loadSettings() {
-      const [optionsResult, examTypesResult, settingsResult] = await Promise.all([
+      const [optionsResult, examTypesResult, settingsResult, textbooksResult] = await Promise.all([
         getFeedOptionSets(),
-        getExamTypes(),  // 🆕 추가
+        getExamTypes(),
         getTenantSettings(),
+        getTextbooksForFeed(),
       ]);
       
       if (optionsResult.success && optionsResult.data) {
         setOptionSets(optionsResult.data);
       }
       
-      // 🆕 시험 종류 로드
       if (examTypesResult.success && examTypesResult.data) {
         setExamTypes(examTypesResult.data);
       }
@@ -73,6 +79,14 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
       if (settingsResult.success && settingsResult.data) {
         setTenantSettings(settingsResult.data);
       }
+      
+      // 교재 목록 로드
+      if (textbooksResult.success && textbooksResult.data) {
+        setTextbooks(textbooksResult.data);
+      }
+      
+      // 🆕 설정 로드 완료
+      setSettingsLoaded(true);
     }
     loadSettings();
   }, []);
@@ -82,8 +96,10 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
     classId,
     date,
     optionSets,
-    examTypes,  // 🆕 추가
+    examTypes,
+    textbooks,
     tenantSettings,
+    settingsLoaded,  // 🆕 추가
     makeupTicketMap,
     setMakeupTicketMap,
   });
@@ -140,8 +156,9 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
         notifyParent: false,
         progressText: undefined,
         previousProgress: undefined,
+        progressEntries: [],  // 🆕 추가
         feedValues,
-        examScores,  // 🆕 추가
+        examScores,
         memoValues: { 'default': '' },
         materials: [],
         status: 'empty',
@@ -159,8 +176,10 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
     students: regularFeed.students,
     cardDataMap: regularFeed.cardDataMap,
     optionSets,
-    examTypes,  // 🆕 추가
+    examTypes,
+    textbooks,  // 🆕 추가
     tenantSettings,
+    previousProgressEntriesMap: regularFeed.previousProgressEntriesMap,  // 🆕 추가
     
     // 바텀시트
     bottomSheet: bottomSheetHook.bottomSheet,
@@ -173,9 +192,11 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
     handleNotifyParentChange: regularFeed.handleNotifyParentChange,
     handleNeedsMakeupChange: regularFeed.handleNeedsMakeupChange,
     handleProgressChange: regularFeed.handleProgressChange,
+    handleProgressEntriesChange: regularFeed.handleProgressEntriesChange,  // 🆕 추가
+    handleApplyProgressToAll: regularFeed.handleApplyProgressToAll,  // 🆕 진도 반 전체 적용
     handleMemoChange: regularFeed.handleMemoChange,
     handleFeedValueChange: regularFeed.handleFeedValueChange,
-    handleExamScoreChange: regularFeed.handleExamScoreChange,  // 🆕 추가
+    handleExamScoreChange: regularFeed.handleExamScoreChange,
     handleSave: regularFeed.handleSave,
     handleSaveAll: regularFeed.handleSaveAll,
     
