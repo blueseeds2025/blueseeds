@@ -9,17 +9,14 @@ import type { Database } from '@/lib/database.types';
 export default function TeacherDashboard() {
   const [teacherName, setTeacherName] = useState('');
   
-  // 오늘의 결석자 (임시 데이터 - 나중에 자기 반만)
-  const todayAbsences = [
-    { id: 1, studentName: '김민준', className: '초등A반', reason: '병결' },
-    { id: 2, studentName: '이서연', className: '초등A반', reason: '개인사유' },
-  ];
+  // 오늘의 결석자 (TODO: DB에서 가져오기)
+  const todayAbsences: { id: number; studentName: string; className: string; reason: string }[] = [];
   
-  // 내 반 보강 현황 (임시 데이터)
-  const myMakeups = [
-    { id: 1, studentName: '김민준', originalDate: '2024-01-15', status: '미배정' },
-    { id: 2, studentName: '이서연', originalDate: '2024-01-14', status: '오늘 예정', scheduledTime: '15:00' },
-  ];
+  // 내 반 보강 현황 (TODO: DB에서 가져오기)
+  const myMakeups: { id: number; studentName: string; originalDate: string; status: string; scheduledTime?: string }[] = [];
+  
+  // 오늘의 수업 일정 (TODO: DB에서 가져오기)
+  const todaySchedule: { id: number; time: string; studentName: string; className: string; isMakeup?: boolean }[] = [];
   
   const supabase = createBrowserClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -59,7 +56,7 @@ export default function TeacherDashboard() {
             <Clock className="h-4 w-4 text-gray-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">5</div>
+            <div className="text-2xl font-bold">{todaySchedule.length}</div>
             <p className="text-xs text-gray-600">명</p>
           </CardContent>
         </Card>
@@ -81,7 +78,7 @@ export default function TeacherDashboard() {
             <FileText className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">3</div>
+            <div className="text-2xl font-bold">0</div>
             <p className="text-xs text-gray-600">건 완료</p>
           </CardContent>
         </Card>
@@ -186,47 +183,46 @@ export default function TeacherDashboard() {
         </Card>
       </div>
 
-      {/* 오늘의 할 일 */}
+      {/* 오늘의 수업 일정 */}
       <Card>
         <CardHeader>
           <CardTitle>오늘의 수업 일정</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            <div className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50">
-              <div className="flex items-center gap-4">
-                <span className="text-sm font-medium text-gray-600">14:00</span>
-                <span className="font-medium">김민준</span>
-                <span className="text-sm text-gray-600">초등A반</span>
-              </div>
-              <div className="flex gap-2">
-                <button className="text-sm text-blue-600 hover:underline">피드 작성</button>
-                <span className="text-sm text-gray-400">|</span>
-                <button className="text-sm text-red-600 hover:underline">결석 처리</button>
-              </div>
-            </div>
-            <div className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 bg-orange-50">
-              <div className="flex items-center gap-4">
-                <span className="text-sm font-medium text-gray-600">15:00</span>
-                <span className="font-medium">이서연</span>
-                <span className="text-sm px-2 py-0.5 bg-orange-200 text-orange-800 rounded">보강</span>
-              </div>
-              <div className="flex gap-2">
-                <button className="text-sm text-green-600 hover:underline">완료 처리</button>
-              </div>
-            </div>
-            <div className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50">
-              <div className="flex items-center gap-4">
-                <span className="text-sm font-medium text-gray-600">16:00</span>
-                <span className="font-medium">박지우</span>
-                <span className="text-sm text-gray-600">초등A반</span>
-              </div>
-              <div className="flex gap-2">
-                <button className="text-sm text-blue-600 hover:underline">피드 작성</button>
-                <span className="text-sm text-gray-400">|</span>
-                <button className="text-sm text-red-600 hover:underline">결석 처리</button>
-              </div>
-            </div>
+            {todaySchedule.length > 0 ? (
+              todaySchedule.map((schedule) => (
+                <div 
+                  key={schedule.id} 
+                  className={`flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 ${schedule.isMakeup ? 'bg-orange-50' : ''}`}
+                >
+                  <div className="flex items-center gap-4">
+                    <span className="text-sm font-medium text-gray-600">{schedule.time}</span>
+                    <span className="font-medium">{schedule.studentName}</span>
+                    {schedule.isMakeup ? (
+                      <span className="text-sm px-2 py-0.5 bg-orange-200 text-orange-800 rounded">보강</span>
+                    ) : (
+                      <span className="text-sm text-gray-600">{schedule.className}</span>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    {schedule.isMakeup ? (
+                      <button className="text-sm text-green-600 hover:underline">완료 처리</button>
+                    ) : (
+                      <>
+                        <button className="text-sm text-blue-600 hover:underline">피드 작성</button>
+                        <span className="text-sm text-gray-400">|</span>
+                        <button className="text-sm text-red-600 hover:underline">결석 처리</button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-gray-500 text-center py-4">
+                오늘 수업 일정이 없습니다
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>
