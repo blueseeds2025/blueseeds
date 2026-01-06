@@ -140,13 +140,14 @@ export async function getTeacherDetails(teacherId: string): Promise<TeacherWithD
     is_active: ca.is_active,
   }));
 
-  // 3. 피드 항목 목록 (전체)
+  // 3. 피드 항목 목록 (전체) - exam_score 제외
   const { data: allOptionSets, error: optionSetErr } = await sb
     .from('feed_option_sets')
     .select('id, name')
     .eq('tenant_id', tenantId)
     .is('deleted_at', null)
-    .eq('is_active', true);
+    .eq('is_active', true)
+    .or('type.is.null,type.eq.normal');
 
   if (optionSetErr) {
     console.error('[getTeacherDetails] optionSet error:', optionSetErr);
@@ -464,6 +465,7 @@ export async function listFeedOptionSets(): Promise<FeedOptionSet[]> {
     .eq('tenant_id', tenantId)
     .is('deleted_at', null)
     .eq('is_active', true)
+    .or('type.is.null,type.eq.normal')
     .order('created_at', { ascending: true });
 
   if (error) {
