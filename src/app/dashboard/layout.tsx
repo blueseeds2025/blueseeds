@@ -21,7 +21,7 @@ import {
   ClipboardList,
   Sliders
 } from 'lucide-react';
-import type { Database } from '@/lib/supabase/types';
+import type { Database } from '@/lib/database.types';
 
 // 메뉴 스켈레톤 컴포넌트
 const SKELETON_WIDTHS = [72, 85, 68, 90, 76, 82, 70, 88];

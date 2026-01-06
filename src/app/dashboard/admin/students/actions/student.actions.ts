@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { revalidatePath } from 'next/cache';
 
-import type { Database } from '@/lib/supabase/types';
+import type { Database } from '@/lib/database.types';
 import type { ActionResult, Student, StudentFormData, StudentWithDetails, StudentEnrollment, ClassInfo } from '../types';
 
 // =======================

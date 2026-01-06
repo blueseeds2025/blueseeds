@@ -727,3 +727,50 @@ export async function getClassesForSchedule(): Promise<{
     return { success: false, error: '반 목록을 불러오는데 실패했습니다' };
   }
 }
+
+// ============================================================================
+// 시간 변경 요청 (선생님 → 원장)
+// ============================================================================
+
+export async function requestClassChange(input: {
+  studentId: string;
+  message: string;
+}): Promise<{
+  success: boolean;
+  error?: string;
+}> {
+  try {
+    const supabase = await createClient();
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { success: false, error: '로그인이 필요합니다' };
+    }
+    
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('tenant_id')
+      .eq('id', user.id)
+      .single();
+    
+    if (!profile) {
+      return { success: false, error: '프로필을 찾을 수 없습니다' };
+    }
+    
+    const { error } = await supabase
+      .from('class_change_requests')
+      .insert({
+        tenant_id: profile.tenant_id,
+        student_id: input.studentId,
+        requested_by: user.id,
+        message: input.message,
+      });
+    
+    if (error) throw error;
+    
+    return { success: true };
+  } catch (error) {
+    console.error('requestClassChange error:', error);
+    return { success: false, error: '요청에 실패했습니다' };
+  }
+}

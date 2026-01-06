@@ -1,7 +1,7 @@
 'use server';
 
 import { supabaseServer, getTenantIdOrThrow } from '@/lib/supabase';
-import type { Database } from '@/lib/supabase/types';
+import type { Database } from '@/lib/database.types';
 import type { FeedConfig, OptionSet, Option, ReportCategory } from '@/types/feed-settings';
 
 // ============================================================================

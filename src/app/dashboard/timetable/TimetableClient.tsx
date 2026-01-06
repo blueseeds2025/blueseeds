@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useEffect, DragEvent } from 'react';
-import { X, Clock } from 'lucide-react';
+import { X, Clock, Send } from 'lucide-react';
 import { 
   getScheduleBlocks, 
   moveStudentThisDay,
   moveStudentWholeGroup,
+  requestClassChange,
   ScheduleBlock,
   Teacher,
   Student
@@ -100,6 +101,15 @@ export default function TimetableClient() {
     toBlock: ScheduleBlock | null;
   }>({ open: false, student: null, fromBlock: null, toBlock: null });
   const [isMoving, setIsMoving] = useState(false);
+
+  // 시간 변경 요청 모달 (선생님용)
+  const [changeModal, setChangeModal] = useState<{
+    open: boolean;
+    student: Student | null;
+    fromBlock: ScheduleBlock | null;
+  }>({ open: false, student: null, fromBlock: null });
+  const [requestMessage, setRequestMessage] = useState('');
+  const [isRequesting, setIsRequesting] = useState(false);
 
   // ============================================================================
   // 데이터 로드
@@ -268,6 +278,40 @@ export default function TimetableClient() {
     }
     
     setIsMoving(false);
+  }
+
+  // ============================================================================
+  // 시간 변경 요청 (선생님용)
+  // ============================================================================
+
+  function openChangeModal(student: Student, fromBlock: ScheduleBlock) {
+    setChangeModal({ open: true, student, fromBlock });
+    setRequestMessage('');
+  }
+
+  function closeChangeModal() {
+    setChangeModal({ open: false, student: null, fromBlock: null });
+    setRequestMessage('');
+  }
+
+  async function handleRequestChange() {
+    if (!changeModal.student || !requestMessage.trim()) return;
+    
+    setIsRequesting(true);
+    
+    const result = await requestClassChange({
+      studentId: changeModal.student.id,
+      message: requestMessage.trim(),
+    });
+    
+    if (result.success) {
+      toast.success('요청이 전송되었습니다');
+      closeChangeModal();
+    } else {
+      toast.error(result.error || '요청에 실패했습니다');
+    }
+    
+    setIsRequesting(false);
   }
 
   // ============================================================================
@@ -550,6 +594,13 @@ export default function TimetableClient() {
                                     draggable
                                     onDragStart={(e) => handleDragStart(e, student, block)}
                                     onDragEnd={handleDragEnd}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      // 선생님만 클릭 시 시간 변경 요청 모달
+                                      if (userRole === 'teacher') {
+                                        openChangeModal(student, block);
+                                      }
+                                    }}
                                     className={`text-xs px-1.5 py-0.5 rounded cursor-grab active:cursor-grabbing
                                                transition-colors select-none
                                                ${dragData?.student.id === student.id
@@ -657,6 +708,68 @@ export default function TimetableClient() {
                 className="w-full px-4 py-2 text-[#6B7280] hover:text-[#374151]"
               >
                 취소
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 시간 변경 요청 모달 (선생님용) */}
+      {changeModal.open && changeModal.student && changeModal.fromBlock && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl w-full max-w-sm mx-4 shadow-2xl">
+            <div className="flex items-center justify-between p-4 border-b border-[#E5E7EB]">
+              <h2 className="text-lg font-semibold text-[#111827]">
+                시간 변경 요청
+              </h2>
+              <button
+                onClick={closeChangeModal}
+                className="p-2 rounded-lg hover:bg-[#F3F4F6]"
+              >
+                <X className="w-5 h-5 text-[#6B7280]" />
+              </button>
+            </div>
+            
+            <div className="p-4 space-y-4">
+              {/* 학생 정보 */}
+              <div className="bg-[#F9FAFB] rounded-lg p-3">
+                <p className="text-sm font-medium text-[#111827]">
+                  {changeModal.student.name}
+                </p>
+                <p className="text-xs text-[#6B7280] mt-1">
+                  현재: {changeModal.fromBlock.className} ({DAY_NAMES[changeModal.fromBlock.dayOfWeek]} {changeModal.fromBlock.startTime})
+                </p>
+              </div>
+
+              {/* 메모 입력 */}
+              <div>
+                <label className="block text-sm font-medium text-[#374151] mb-2">
+                  요청 내용
+                </label>
+                <textarea
+                  value={requestMessage}
+                  onChange={(e) => setRequestMessage(e.target.value)}
+                  placeholder="예: 화목금 4시로 2월부터 시간 변경 요망"
+                  rows={3}
+                  className="w-full px-3 py-2 border border-[#E5E7EB] rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#6366F1] focus:border-transparent"
+                />
+              </div>
+            </div>
+            
+            <div className="p-4 border-t border-[#E5E7EB]">
+              <button
+                onClick={handleRequestChange}
+                disabled={!requestMessage.trim() || isRequesting}
+                className="w-full px-4 py-2.5 bg-[#6366F1] text-white rounded-lg hover:bg-[#4F46E5] disabled:opacity-50 font-medium flex items-center justify-center gap-2"
+              >
+                {isRequesting ? (
+                  '요청 중...'
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    요청 보내기
+                  </>
+                )}
               </button>
             </div>
           </div>

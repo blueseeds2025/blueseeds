@@ -18,6 +18,9 @@ import type {
   ScoreSummary,
   ProgressItem,
   TemplateType,
+  ExamScoreDetail,
+  ExamScoreRecord,
+  ExamSummary,
 } from '@/types/monthly-report.types';
 
 // ----------------------------------------------------------------------------
@@ -50,7 +53,7 @@ async function getCurrentProfile() {
 export async function getMonthlyTemplateFromSettings(): Promise<ActionResult<{ templateType: TemplateType }>> {
   const result = await getCurrentProfile();
   if ('error' in result) {
-    return { ok: false, message: result.error };
+    return { ok: false, message: result.error ?? '오류가 발생했습니다' };
   }
   const { profile, supabase } = result;
   
@@ -84,7 +87,7 @@ export async function getMonthlyReports(
 ): Promise<ActionResult<MonthlyReportListResult>> {
   const result = await getCurrentProfile();
   if ('error' in result) {
-    return { ok: false, message: result.error };
+    return { ok: false, message: result.error ?? '오류가 발생했습니다' };
   }
   const { profile, supabase } = result;
   
@@ -143,7 +146,7 @@ export async function getMonthlyReport(
 ): Promise<ActionResult<MonthlyReportWithStudent>> {
   const result = await getCurrentProfile();
   if ('error' in result) {
-    return { ok: false, message: result.error };
+    return { ok: false, message: result.error ?? '오류가 발생했습니다' };
   }
   const { profile, supabase } = result;
   
@@ -180,7 +183,7 @@ export async function createMonthlyReport(
 ): Promise<ActionResult<MonthlyReport>> {
   const result = await getCurrentProfile();
   if ('error' in result) {
-    return { ok: false, message: result.error };
+    return { ok: false, message: result.error ?? '오류가 발생했습니다' };
   }
   const { profile, supabase } = result;
   
@@ -240,6 +243,7 @@ export async function createMonthlyReport(
         attendance_summary: aggregateResult.data?.attendance || {},
         score_summary: aggregateResult.data?.scores || {},
         progress_summary: aggregateResult.data?.progress || [],
+        exam_summary: aggregateResult.data?.exam || { summary: { average: 0, highest: null, lowest: null, count: 0 }, records: [] },
         status: 'draft',
         created_by: profile.id,
       })
@@ -268,7 +272,7 @@ export async function updateMonthlyReport(
 ): Promise<ActionResult<MonthlyReport>> {
   const result = await getCurrentProfile();
   if ('error' in result) {
-    return { ok: false, message: result.error };
+    return { ok: false, message: result.error ?? '오류가 발생했습니다' };
   }
   const { profile, supabase } = result;
   
@@ -307,7 +311,7 @@ export async function deleteMonthlyReport(
 ): Promise<ActionResult<void>> {
   const result = await getCurrentProfile();
   if ('error' in result) {
-    return { ok: false, message: result.error };
+    return { ok: false, message: result.error ?? '오류가 발생했습니다' };
   }
   const { profile, supabase } = result;
   
@@ -341,7 +345,7 @@ export async function updateReportStatus(
 ): Promise<ActionResult<MonthlyReport>> {
   const result = await getCurrentProfile();
   if ('error' in result) {
-    return { ok: false, message: result.error };
+    return { ok: false, message: result.error ?? '오류가 발생했습니다' };
   }
   const { profile, supabase } = result;
   
@@ -394,6 +398,7 @@ async function aggregateFeedData(
   attendance: AttendanceSummary;
   scores: ScoreSummary;
   progress: ProgressItem[];
+  exam: ExamScoreDetail;
 }>> {
   try {
     const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
@@ -492,28 +497,157 @@ async function aggregateFeedData(
     }
     
     const progress: ProgressItem[] = [];
-    const weekMap: Record<number, string[]> = {};
     
-    feeds?.forEach((feed) => {
-      if (!feed.progress_text) return;
-      const date = new Date(feed.feed_date);
-      const week = Math.ceil(date.getDate() / 7);
-      if (!weekMap[week]) {
-        weekMap[week] = [];
-      }
-      weekMap[week].push(feed.progress_text);
-    });
+    // ========== 진도 집계 (feed_progress_entries 테이블) ==========
+    const { data: progressData, error: progressError } = await supabase
+      .from('feed_progress_entries')
+      .select(`
+        feed_date,
+        textbook_id,
+        end_page_int,
+        end_page_text,
+        textbook:textbooks(title, total_pages)
+      `)
+      .eq('student_id', studentId)
+      .eq('tenant_id', tenantId)
+      .gte('feed_date', startDate)
+      .lte('feed_date', endDate)
+      .is('deleted_at', null);
     
-    Object.entries(weekMap).forEach(([week, contents]) => {
-      progress.push({
-        week: parseInt(week),
-        content: contents.join(', '),
+    if (progressError) {
+      console.error('aggregateFeedData progressData error:', progressError);
+    }
+    
+    if (!progressError && progressData && progressData.length > 0) {
+      // 주차별 + 교재별 진도 그룹핑
+      const weekTextbookMap: Record<number, Record<string, { title: string; maxPage: number; totalPages: number | null }>> = {};
+      
+      progressData.forEach((p) => {
+        const date = new Date(p.feed_date);
+        const week = Math.ceil(date.getDate() / 7);
+        
+        const textbook = p.textbook as { title: string; total_pages: number | null } | null;
+        const title = textbook?.title || '교재';
+        const totalPages = textbook?.total_pages || null;
+        
+        // end_page_int가 없으면 스킵
+        if (!p.end_page_int) return;
+        
+        if (!weekTextbookMap[week]) {
+          weekTextbookMap[week] = {};
+        }
+        
+        // 같은 주차, 같은 교재면 최대 페이지만 기록
+        if (!weekTextbookMap[week][p.textbook_id]) {
+          weekTextbookMap[week][p.textbook_id] = {
+            title,
+            maxPage: p.end_page_int,
+            totalPages,
+          };
+        } else {
+          weekTextbookMap[week][p.textbook_id].maxPage = Math.max(
+            weekTextbookMap[week][p.textbook_id].maxPage,
+            p.end_page_int
+          );
+        }
       });
-    });
+      
+      // ProgressItem 배열로 변환
+      Object.entries(weekTextbookMap)
+        .sort(([a], [b]) => parseInt(a) - parseInt(b))
+        .forEach(([week, textbooks]) => {
+          const contents = Object.values(textbooks).map((t) => {
+            if (t.totalPages && t.totalPages > 0) {
+              const percent = Math.round((t.maxPage / t.totalPages) * 100);
+              return `${t.title} p.${t.maxPage} (${percent}%)`;
+            }
+            return `${t.title} p.${t.maxPage}`;
+          });
+          
+          progress.push({
+            week: parseInt(week),
+            content: contents.join(' / '),
+          });
+        });
+    }
+    
+    // ========== 시험 점수 집계 ==========
+    const examRecords: ExamScoreRecord[] = [];
+    
+    if (feedIds.length > 0) {
+      // feedId -> feed_date 맵 생성
+      const feedDateMap = new Map<string, string>();
+      feeds?.forEach((f) => {
+        feedDateMap.set(f.id, f.feed_date);
+      });
+      
+      // feed_option_sets에서 type='exam_score'인 항목의 점수 조회
+      const { data: examValues, error: examError } = await supabase
+        .from('feed_values')
+        .select(`
+          feed_id,
+          score,
+          set:feed_option_sets!inner(id, name, type)
+        `)
+        .in('feed_id', feedIds)
+        .not('score', 'is', null);
+      
+      if (examError) {
+        console.error('aggregateFeedData examValues error:', examError);
+      }
+      
+      if (!examError && examValues) {
+        examValues.forEach((v) => {
+          const set = v.set as { id: string; name: string; type: string };
+          
+          // exam_score 타입만 필터링
+          if (set.type !== 'exam_score') return;
+          if (v.score === null || v.score === undefined) return;
+          
+          const feedDate = feedDateMap.get(v.feed_id);
+          if (!feedDate) return;
+          
+          examRecords.push({
+            date: feedDate,
+            examName: set.name,
+            score: v.score,
+          });
+        });
+      }
+    }
+    
+    // 날짜순 정렬
+    examRecords.sort((a, b) => a.date.localeCompare(b.date));
+    
+    // 요약 계산
+    const examSummary: ExamSummary = {
+      average: 0,
+      highest: null,
+      lowest: null,
+      count: examRecords.length,
+    };
+    
+    if (examRecords.length > 0) {
+      const total = examRecords.reduce((sum, r) => sum + r.score, 0);
+      examSummary.average = Math.round(total / examRecords.length);
+      
+      // 최고점
+      const highest = examRecords.reduce((max, r) => r.score > max.score ? r : max, examRecords[0]);
+      examSummary.highest = { score: highest.score, date: highest.date, examName: highest.examName };
+      
+      // 최저점
+      const lowest = examRecords.reduce((min, r) => r.score < min.score ? r : min, examRecords[0]);
+      examSummary.lowest = { score: lowest.score, date: lowest.date, examName: lowest.examName };
+    }
+    
+    const exam: ExamScoreDetail = {
+      summary: examSummary,
+      records: examRecords,
+    };
     
     return {
       ok: true,
-      data: { attendance, scores, progress },
+      data: { attendance, scores, progress, exam },
     };
   } catch (err) {
     console.error('aggregateFeedData exception:', err);
@@ -532,7 +666,7 @@ export async function createMonthlyReportsForClass(
 ): Promise<ActionResult<{ created: number; skipped: number; errors: string[] }>> {
   const result = await getCurrentProfile();
   if ('error' in result) {
-    return { ok: false, message: result.error };
+    return { ok: false, message: result.error ?? '오류가 발생했습니다' };
   }
   const { profile, supabase } = result;
   
@@ -626,7 +760,7 @@ export async function getStudentsForMonthlyReport(
 ): Promise<ActionResult<{ id: string; name: string; class_name?: string }[]>> {
   const result = await getCurrentProfile();
   if ('error' in result) {
-    return { ok: false, message: result.error };
+    return { ok: false, message: result.error ?? '오류가 발생했습니다' };
   }
   const { profile, supabase } = result;
   
@@ -710,7 +844,7 @@ export async function getStudentsForMonthlyReport(
 export async function getClassesForMonthlyReport(): Promise<ActionResult<{ id: string; name: string }[]>> {
   const result = await getCurrentProfile();
   if ('error' in result) {
-    return { ok: false, message: result.error };
+    return { ok: false, message: result.error ?? '오류가 발생했습니다' };
   }
   const { profile, supabase } = result;
   

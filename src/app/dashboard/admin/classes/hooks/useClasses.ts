@@ -294,7 +294,7 @@ export function useClasses() {
       }));
       return true;
     } else {
-      toast.error(result.message);
+     toast.error(!result.ok ? result.message : '오류가 발생했습니다');
       return false;
     }
   }, [selectedClass]);

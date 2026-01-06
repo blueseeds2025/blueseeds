@@ -16,6 +16,8 @@ export interface PendingMakeupTicket {
   classId: string;
   absenceDate: string;
   absenceReason: string | null;
+  scheduledDate: string | null;
+  scheduledTime: string | null;
 }
 
 // ============================================================================
@@ -142,7 +144,7 @@ export async function getPendingMakeupTickets(): Promise<{
     
     const { data: tickets, error: ticketsError } = await supabase
       .from('makeup_tickets')
-      .select('id, student_id, class_id, absence_date, absence_reason')
+      .select('id, student_id, class_id, absence_date, absence_reason, scheduled_date, scheduled_time')
       .eq('tenant_id', profile.tenant_id)
       .eq('status', 'pending')
       .order('absence_date', { ascending: true });
@@ -187,6 +189,8 @@ export async function getPendingMakeupTickets(): Promise<{
         classId: ticket.class_id!,
         absenceDate: ticket.absence_date,
         absenceReason: ticket.absence_reason,
+        scheduledDate: ticket.scheduled_date,
+        scheduledTime: ticket.scheduled_time,
       }));
     
     return { success: true, data: result };

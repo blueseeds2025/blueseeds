@@ -2,7 +2,14 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
-import { getMakeupTickets, completeTicket, reopenTicket, type MakeupTicket } from '../makeup.actions';
+import { 
+  getMakeupTickets, 
+  completeTicket, 
+  reopenTicket, 
+  scheduleTicket,
+  cancelTicketWithReason,
+  type MakeupTicket 
+} from '../makeup.actions';
 import { getTodayString, getDaysAgoString, getMonthStartString } from '@/lib/utils';
 
 // ============================================================================
@@ -11,7 +18,7 @@ import { getTodayString, getDaysAgoString, getMonthStartString } from '@/lib/uti
 
 export type { MakeupTicket } from '../makeup.actions';
 export type DateFilter = 'today' | 'week' | 'month' | 'custom';
-export type StatusFilter = 'pending' | 'completed' | 'all';
+export type StatusFilter = 'pending' | 'completed' | 'cancelled' | 'all';
 
 // ============================================================================
 // Hook
@@ -85,11 +92,7 @@ export function useMakeupTickets() {
   // 완료 처리
   const handleComplete = useCallback(
     async (ticketId: string) => {
-      const note = noteInputs[ticketId]?.trim();
-      if (!note) {
-        toast.error('처리 내용을 입력해주세요');
-        return;
-      }
+      const note = noteInputs[ticketId]?.trim() || '보강 완료';
 
       setProcessingId(ticketId);
       const result = await completeTicket(ticketId, note);
@@ -114,6 +117,45 @@ export function useMakeupTickets() {
 
       if (result.success) {
         toast.success('대기 상태로 되돌렸습니다');
+        loadTickets();
+      } else {
+        toast.error(result.error || '처리 실패');
+      }
+      setProcessingId(null);
+    },
+    [loadTickets]
+  );
+
+  // 날짜 예약
+  const handleSchedule = useCallback(
+    async (ticketId: string, scheduledDate: string, scheduledTime?: string) => {
+      setProcessingId(ticketId);
+      const result = await scheduleTicket(ticketId, scheduledDate, scheduledTime);
+
+      if (result.success) {
+        toast.success('보강 날짜가 예약되었습니다');
+        loadTickets();
+      } else {
+        toast.error(result.error || '예약 실패');
+      }
+      setProcessingId(null);
+    },
+    [loadTickets]
+  );
+
+  // 보강 안함 (사유 포함)
+  const handleCancelWithReason = useCallback(
+    async (ticketId: string, reason: string) => {
+      if (!reason.trim()) {
+        toast.error('사유를 입력해주세요');
+        return;
+      }
+
+      setProcessingId(ticketId);
+      const result = await cancelTicketWithReason(ticketId, reason.trim());
+
+      if (result.success) {
+        toast.success('보강 안함 처리되었습니다');
         loadTickets();
       } else {
         toast.error(result.error || '처리 실패');
@@ -158,6 +200,8 @@ export function useMakeupTickets() {
     // Actions
     handleComplete,
     handleReopen,
+    handleSchedule,
+    handleCancelWithReason,
     updateNoteInput,
     reload: loadTickets,
   };

@@ -9,7 +9,11 @@ import MakeupSection from './components/MakeupSection';
 // Main Component
 // ============================================================================
 
-export default function MakeupManagePage() {
+interface MakeupManagePageProps {
+  role?: 'owner' | 'teacher';
+}
+
+export default function MakeupManagePage({ role = 'owner' }: MakeupManagePageProps) {
   // Hooks
   const absents = useAbsents();
   const makeup = useMakeupTickets();
@@ -44,6 +48,7 @@ export default function MakeupManagePage() {
             processingId={makeup.processingId}
             noteInputs={makeup.noteInputs}
             stats={makeup.stats}
+            role={role}
             statusFilter={makeup.statusFilter}
             dateFilter={makeup.dateFilter}
             customStartDate={makeup.customStartDate}
@@ -55,6 +60,8 @@ export default function MakeupManagePage() {
             onNoteChange={makeup.updateNoteInput}
             onComplete={makeup.handleComplete}
             onReopen={makeup.handleReopen}
+            onSchedule={makeup.handleSchedule}
+            onCancelWithReason={makeup.handleCancelWithReason}
           />
         </div>
       </div>

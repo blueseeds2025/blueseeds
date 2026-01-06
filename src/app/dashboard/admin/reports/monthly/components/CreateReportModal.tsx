@@ -128,7 +128,7 @@ export default function CreateReportModal({
           }
           onSuccess();
         } else {
-          toast.error(result.message || '생성에 실패했습니다.');
+       toast.error(!result.ok ? result.message : '생성에 실패했습니다.');
         }
       }
     } finally {

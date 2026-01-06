@@ -324,10 +324,7 @@ export async function getTodayScheduledMakeups(): Promise<MakeupTicketListRespon
       return { success: false, error: '프로필을 찾을 수 없습니다' };
     }
     
-    // 한국 시간대로 오늘 날짜 계산
-    const now = new Date();
-    const koreaTime = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-    const today = koreaTime.toISOString().split('T')[0];
+    const today = new Date().toISOString().split('T')[0];
     
     let query = supabase
       .from('makeup_tickets')

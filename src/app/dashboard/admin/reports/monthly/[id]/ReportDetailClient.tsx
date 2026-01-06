@@ -17,6 +17,11 @@ import type {
 } from '@/types/monthly-report.types';
 import { STATUS_INFO, TEMPLATE_INFO } from '@/types/monthly-report.types';
 import { toast } from 'sonner';
+import {
+  AttendanceChart,
+  ProgressTimeline,
+  ExamLineChart,
+} from '../components/ReportCharts';
 
 interface Props {
   reportId: string;
@@ -183,80 +188,42 @@ export default function ReportDetailClient({ reportId }: Props) {
         <div className="space-y-6">
           {activeTab === 'data' && (
             <>
-              {/* 출석 요약 */}
+              {/* 출석 차트 */}
               <div className="bg-white rounded-xl border border-stone-200 p-5">
                 <h3 className="font-semibold text-stone-800 mb-4">📅 출석 현황</h3>
-                <div className="grid grid-cols-4 gap-4">
-                  <div className="text-center p-3 bg-stone-50 rounded-lg">
-                    <p className="text-2xl font-bold text-stone-800">{report.attendance_summary?.total_days || 0}</p>
+                <AttendanceChart data={report.attendance_summary} />
+                
+                {/* 상세 수치 */}
+                <div className="grid grid-cols-4 gap-3 mt-4 pt-4 border-t border-stone-100">
+                  <div className="text-center">
+                    <p className="text-lg font-bold text-stone-800">{report.attendance_summary?.total_days || 0}</p>
                     <p className="text-xs text-stone-500">전체</p>
                   </div>
-                  <div className="text-center p-3 bg-green-50 rounded-lg">
-                    <p className="text-2xl font-bold text-green-600">{report.attendance_summary?.attended || 0}</p>
+                  <div className="text-center">
+                    <p className="text-lg font-bold text-green-600">{report.attendance_summary?.attended || 0}</p>
                     <p className="text-xs text-stone-500">출석</p>
                   </div>
-                  <div className="text-center p-3 bg-amber-50 rounded-lg">
-                    <p className="text-2xl font-bold text-amber-600">{report.attendance_summary?.late || 0}</p>
+                  <div className="text-center">
+                    <p className="text-lg font-bold text-amber-600">{report.attendance_summary?.late || 0}</p>
                     <p className="text-xs text-stone-500">지각</p>
                   </div>
-                  <div className="text-center p-3 bg-red-50 rounded-lg">
-                    <p className="text-2xl font-bold text-red-600">{report.attendance_summary?.absent || 0}</p>
+                  <div className="text-center">
+                    <p className="text-lg font-bold text-red-600">{report.attendance_summary?.absent || 0}</p>
                     <p className="text-xs text-stone-500">결석</p>
                   </div>
                 </div>
-                <div className="mt-4 p-3 bg-[#7C3AED]/5 rounded-lg text-center">
-                  <p className="text-sm text-stone-600">출석률</p>
-                  <p className="text-3xl font-bold text-[#7C3AED]">{report.attendance_summary?.rate || 0}%</p>
-                </div>
               </div>
               
-              {/* 점수 요약 */}
+              {/* 시험 점수 */}
               <div className="bg-white rounded-xl border border-stone-200 p-5">
-                <h3 className="font-semibold text-stone-800 mb-4">📊 영역별 점수</h3>
-                {Object.keys(report.score_summary || {}).length === 0 ? (
-                  <p className="text-sm text-stone-400 text-center py-4">점수 데이터가 없습니다</p>
-                ) : (
-                  <div className="space-y-3">
-                    {Object.entries(report.score_summary || {}).map(([category, data]) => (
-                      <div key={category}>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-stone-600">{category}</span>
-                          <span className="font-medium text-stone-800">{data.average}점</span>
-                        </div>
-                        <div className="h-2 bg-stone-100 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all ${
-                              data.average >= 90 ? 'bg-green-500' :
-                              data.average >= 80 ? 'bg-blue-500' :
-                              data.average >= 70 ? 'bg-amber-500' :
-                              'bg-red-500'
-                            }`}
-                            style={{ width: `${data.average}%` }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <h3 className="font-semibold text-stone-800 mb-4">📝 시험 점수</h3>
+                <ExamLineChart data={report.exam_summary} />
               </div>
               
-              {/* 진도 요약 */}
+              {/* 진도 타임라인 */}
               <div className="bg-white rounded-xl border border-stone-200 p-5">
                 <h3 className="font-semibold text-stone-800 mb-4">📚 진도 현황</h3>
-                {(report.progress_summary || []).length === 0 ? (
-                  <p className="text-sm text-stone-400 text-center py-4">진도 데이터가 없습니다</p>
-                ) : (
-                  <div className="space-y-2">
-                    {(report.progress_summary || []).map((item, idx) => (
-                      <div key={idx} className="flex gap-3 p-2 hover:bg-stone-50 rounded-lg">
-                        <span className="px-2 py-0.5 bg-[#7C3AED]/10 text-[#7C3AED] text-xs font-medium rounded">
-                          {item.week}주차
-                        </span>
-                        <span className="text-sm text-stone-700">{item.content}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <ProgressTimeline data={report.progress_summary} />
               </div>
             </>
           )}
@@ -408,17 +375,17 @@ export default function ReportDetailClient({ reportId }: Props) {
               <p className="text-xl font-bold text-[#7C3AED]">{report.attendance_summary?.rate || 0}%</p>
             </div>
             
-            {/* 점수 */}
-            {Object.keys(report.score_summary || {}).length > 0 && (
+            {/* 시험 점수 */}
+            {report.exam_summary?.summary?.count > 0 && (
               <div className="p-3 bg-white rounded-lg mb-3">
-                <p className="text-xs text-stone-500 mb-2">영역별 점수</p>
-                <div className="space-y-1.5">
-                  {Object.entries(report.score_summary || {}).slice(0, 4).map(([cat, data]) => (
-                    <div key={cat} className="flex justify-between text-xs">
-                      <span className="text-stone-600">{cat}</span>
-                      <span className="font-medium">{data.average}점</span>
-                    </div>
-                  ))}
+                <p className="text-xs text-stone-500 mb-2">시험 점수</p>
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-xs text-stone-600">평균</span>
+                  <span className="text-lg font-bold text-[#7C3AED]">{report.exam_summary.summary.average}점</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-stone-500">최고 {report.exam_summary.summary.highest?.score ?? '-'}점</span>
+                  <span className="text-stone-500">최저 {report.exam_summary.summary.lowest?.score ?? '-'}점</span>
                 </div>
               </div>
             )}

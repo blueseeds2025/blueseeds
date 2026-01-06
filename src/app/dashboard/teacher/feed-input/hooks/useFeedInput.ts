@@ -228,6 +228,11 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
     handleMakeupSaveAll: makeupFeed.handleMakeupSaveAll,
     makeupDirtyCount: makeupFeed.makeupDirtyCount,
     
+    // 티켓 직접 처리 (날짜 예약, 보강 안함)
+    handleScheduleTicket: makeupFeed.handleScheduleTicket,
+    handleCancelTicket: makeupFeed.handleCancelTicket,
+    processingTicketId: makeupFeed.processingTicketId,
+    
     // 기존 보강생 검색 (하위 호환)
     makeupSearch: makeupFeed.makeupSearch,
     setMakeupSearch: makeupFeed.setMakeupSearch,

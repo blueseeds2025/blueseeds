@@ -5,8 +5,16 @@ import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Users, FileText, Calendar, UserX, ArrowRightLeft } from 'lucide-react';
-import type { Database }from '@/lib/supabase/types';
+import type { Database }from '@/lib/database.types';
 import { getRecentClassTransfers, type RecentClassTransfer } from './students/actions/student.actions';
+import ClassChangeRequestsCard from './components/ClassChangeRequestsCard';
+
+interface TodayScheduledMakeup {
+  id: string;
+  studentName: string;
+  className: string;
+  scheduledTime: string | null;
+}
 
 interface TodayAbsent {
   studentId: string;
@@ -35,6 +43,7 @@ export default function AdminDashboard() {
   const [todayAbsents, setTodayAbsents] = useState<TodayAbsent[]>([]);
   const [pendingMakeupList, setPendingMakeupList] = useState<PendingMakeup[]>([]);
   const [recentTransfers, setRecentTransfers] = useState<RecentClassTransfer[]>([]);
+  const [todayScheduledMakeups, setTodayScheduledMakeups] = useState<TodayScheduledMakeup[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const supabase = createBrowserClient<Database>(
@@ -168,6 +177,38 @@ export default function AdminDashboard() {
       setRecentTransfers(transfersResult.data);
     }
 
+    // 오늘 예정된 보강 조회 (직접 supabase로)
+    const now = new Date();
+    const koreaTime = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+    const todayKorea = koreaTime.toISOString().split('T')[0];
+    
+    const { data: scheduledData } = await supabase
+      .from('makeup_tickets')
+      .select('id, student_id, class_id, scheduled_time')
+      .eq('status', 'pending')
+      .eq('scheduled_date', todayKorea)
+      .order('scheduled_time', { ascending: true });
+    
+    if (scheduledData && scheduledData.length > 0) {
+      const studentIds = [...new Set(scheduledData.map(s => s.student_id))];
+      const classIds = [...new Set(scheduledData.map(s => s.class_id))];
+      
+      const [studentsRes, classesRes] = await Promise.all([
+        supabase.from('students').select('id, name').in('id', studentIds),
+        supabase.from('classes').select('id, name').in('id', classIds),
+      ]);
+      
+      const studentMap = new Map(studentsRes.data?.map(s => [s.id, s.name]) || []);
+      const classMap = new Map(classesRes.data?.map(c => [c.id, c.name]) || []);
+      
+      setTodayScheduledMakeups(scheduledData.map(s => ({
+        id: s.id,
+        studentName: studentMap.get(s.student_id) || '알 수 없음',
+        className: classMap.get(s.class_id) || '알 수 없음',
+        scheduledTime: s.scheduled_time,
+      })));
+    }
+
     setIsLoading(false);
   };
 
@@ -211,6 +252,42 @@ export default function AdminDashboard() {
   return (
     <div>
       <h1 className="text-3xl font-bold mb-8">원장 대시보드</h1>
+      
+      {/* 시간 변경 요청 */}
+      <div className="mb-8">
+        <ClassChangeRequestsCard />
+      </div>
+      
+      {/* 오늘 예정된 보강 */}
+      {todayScheduledMakeups.length > 0 && (
+        <Card className="mb-8 border-[#6366F1]/30 bg-[#EEF2FF]">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="flex items-center gap-2 text-[#4F46E5]">
+              📅 오늘 예정된 보강
+            </CardTitle>
+            <span className="text-sm text-[#6366F1] font-medium">{todayScheduledMakeups.length}건</span>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {todayScheduledMakeups.map((ticket) => (
+                <div 
+                  key={ticket.id}
+                  className="flex items-center justify-between p-3 bg-white rounded-lg border border-[#E5E7EB]"
+                >
+                  <div>
+                    <span className="font-medium text-[#1F2937]">{ticket.studentName}</span>
+                    <span className="mx-2 text-[#9CA3AF]">·</span>
+                    <span className="text-sm text-[#6B7280]">{ticket.className}</span>
+                  </div>
+                  <div className="text-sm text-[#6366F1] font-medium">
+                    {ticket.scheduledTime?.slice(0, 5) || '시간 미정'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
       
       {/* 통계 카드 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -369,7 +446,7 @@ export default function AdminDashboard() {
             </CardTitle>
             {recentTransfers.length > 5 && (
               <button 
-                onClick={() => router.push('/dashboard/admin/students')}
+                onClick={() => router.push('/dashboard/admin/class-transfers')}
                 className="text-sm text-[#6366F1] hover:underline"
               >
                 전체 보기 →

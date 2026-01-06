@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
-import type { Database } from '@/lib/supabase/types';
+import type { Database } from '@/lib/database.types';
 
 type AllowedRole = 'owner' | 'teacher' | 'admin';
 

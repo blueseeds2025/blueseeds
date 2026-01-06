@@ -19,6 +19,7 @@ import {
   saveFeed,
   PendingMakeupTicket,
 } from '../actions/feed.actions';
+import { scheduleTicket, cancelTicketWithReason } from '@/app/dashboard/absence/makeup.actions';
 import { generateIdempotencyKey, TOAST_MESSAGES } from '../constants';
 
 interface UseFeedMakeupProps {
@@ -47,6 +48,9 @@ export function useFeedMakeup({ classId, date, optionSets, tenantSettings }: Use
   // 저장 상태
   const [isSaving, setIsSaving] = useState(false);
   const [savingStudentId, setSavingStudentId] = useState<string | null>(null);
+  
+  // 티켓 처리 상태
+  const [processingTicketId, setProcessingTicketId] = useState<string | null>(null);
 
   // 필터된 보강 대기 목록
   const filteredMakeupTickets = useMemo(() => {
@@ -166,6 +170,47 @@ export function useFeedMakeup({ classId, date, optionSets, tenantSettings }: Use
     
     toast.success(`${ticket.studentName} 보강생 추가됨`);
   }, [makeupCardDataMap, optionSets]);
+
+  // 보강 날짜 예약
+  const handleScheduleTicket = useCallback(async (
+    ticketId: string, 
+    scheduledDate: string, 
+    scheduledTime?: string
+  ) => {
+    setProcessingTicketId(ticketId);
+    
+    const result = await scheduleTicket(ticketId, scheduledDate, scheduledTime);
+    
+    if (result.success) {
+      toast.success('보강 날짜가 예약되었습니다');
+      await loadPendingMakeupTickets();
+    } else {
+      toast.error(result.error || '예약에 실패했습니다');
+    }
+    
+    setProcessingTicketId(null);
+  }, [loadPendingMakeupTickets]);
+
+  // 보강 안함 처리
+  const handleCancelTicket = useCallback(async (ticketId: string, reason: string) => {
+    if (!reason.trim()) {
+      toast.error('사유를 입력해주세요');
+      return;
+    }
+    
+    setProcessingTicketId(ticketId);
+    
+    const result = await cancelTicketWithReason(ticketId, reason.trim());
+    
+    if (result.success) {
+      toast.success('보강 안함 처리되었습니다');
+      await loadPendingMakeupTickets();
+    } else {
+      toast.error(result.error || '처리에 실패했습니다');
+    }
+    
+    setProcessingTicketId(null);
+  }, [loadPendingMakeupTickets]);
 
   // 보강 카드 출결 변경
   const handleMakeupAttendanceChange = useCallback((
@@ -408,6 +453,11 @@ export function useFeedMakeup({ classId, date, optionSets, tenantSettings }: Use
     closeMakeupPanel,
     addMakeupStudentFromTicket,
     loadPendingMakeupTickets,
+    
+    // 티켓 직접 처리
+    handleScheduleTicket,
+    handleCancelTicket,
+    processingTicketId,
     
     // 보강 전용 상태 및 핸들러
     makeupCardDataMap,

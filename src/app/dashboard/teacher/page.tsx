@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Users, FileText, Clock, CheckCircle, UserX, Calendar } from 'lucide-react';
-import type { Database } from '@/lib/supabase/types';
+import type { Database } from '@/lib/database.types';
 
 export default function TeacherDashboard() {
   const [teacherName, setTeacherName] = useState('');

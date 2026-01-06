@@ -62,7 +62,7 @@ export async function getSettingsData(): Promise<ActionResult<SettingsData>> {
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error ?? '오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
 
@@ -260,7 +260,7 @@ export async function updateAcademyInfo(
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error ?? '오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
 
@@ -294,7 +294,7 @@ export async function updateReportSettings(
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error ?? '오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
 
@@ -351,7 +351,7 @@ export async function getOperationSettings(): Promise<ActionResult<OperationSett
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error ?? '오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
 
@@ -414,7 +414,7 @@ export async function updateBasicSettings(
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error ?? '오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
 
@@ -461,7 +461,7 @@ export async function updateOperationMode(
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error ?? '오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
 
@@ -496,7 +496,7 @@ export async function updateMakeupDefaults(
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error ?? '오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
 
@@ -557,7 +557,7 @@ export async function getMaterials(): Promise<ActionResult<Material[]>> {
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error ?? '오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
 
@@ -592,7 +592,7 @@ export async function createMaterial(
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error ?? '오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
 
@@ -654,7 +654,7 @@ export async function deleteMaterial(
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error ?? '오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
 
@@ -704,7 +704,7 @@ export async function getExamTypes(): Promise<ActionResult<ExamType[]>> {
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error ?? '오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
 
@@ -738,7 +738,7 @@ export async function createExamType(
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error ?? '오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
 
@@ -799,7 +799,7 @@ export async function deleteExamType(
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error ?? '오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
 
@@ -848,7 +848,7 @@ export async function getTextbooks(): Promise<ActionResult<Textbook[]>> {
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error ?? '오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
 
@@ -883,7 +883,7 @@ export async function createTextbook(
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error ?? '오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
 
@@ -946,7 +946,7 @@ export async function updateTextbook(
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error ?? '오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
 
@@ -1000,7 +1000,7 @@ export async function deleteTextbook(
   try {
     const ctx = await getAuthContext();
     if ('error' in ctx) {
-      return { ok: false, message: ctx.error };
+      return { ok: false, message: ctx.error ?? '오류가 발생했습니다' };
     }
     const { supabase, profile } = ctx;
 

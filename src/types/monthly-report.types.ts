@@ -43,6 +43,27 @@ export interface ProgressItem {
   note?: string;
 }
 
+// 시험 점수 개별 기록
+export interface ExamScoreRecord {
+  date: string;
+  examName: string;
+  score: number;
+}
+
+// 시험 점수 요약 (Basic용)
+export interface ExamSummary {
+  average: number;
+  highest: { score: number; date: string; examName: string } | null;
+  lowest: { score: number; date: string; examName: string } | null;
+  count: number;
+}
+
+// 시험 점수 상세 (Premium용)
+export interface ExamScoreDetail {
+  summary: ExamSummary;
+  records: ExamScoreRecord[];
+}
+
 // ----------------------------------------------------------------------------
 // 메인 타입 (DB Json 타입 허용)
 // ----------------------------------------------------------------------------
@@ -57,6 +78,7 @@ export interface MonthlyReport {
   attendance_summary: AttendanceSummary | Record<string, unknown>;
   score_summary: ScoreSummary | Record<string, unknown>;
   progress_summary: ProgressItem[] | unknown[];
+  exam_summary: ExamScoreDetail | Record<string, unknown>;
   ai_study_comment: string | null;
   ai_attitude_comment: string | null;
   ai_attendance_comment: string | null;
