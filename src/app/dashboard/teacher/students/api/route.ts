@@ -2,31 +2,23 @@ import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
-  // 디버그 정보 수집
-  const debug: Record<string, unknown> = {};
-  
   try {
     const supabase = await createClient();
     
     const { data: { user } } = await supabase.auth.getUser();
-    debug.user_id = user?.id || 'NO_USER';
-    
     if (!user) {
-      return NextResponse.json({ success: false, error: '로그인 필요', debug }, { status: 401 });
+      return NextResponse.json({ success: false, error: '로그인 필요' }, { status: 401 });
     }
     
     // 프로필 확인
-    const { data: profile, error: profileError } = await supabase
+    const { data: profile } = await supabase
       .from('profiles')
       .select('tenant_id, role')
       .eq('id', user.id)
       .single();
     
-    debug.profile = profile;
-    debug.profile_error = profileError?.message;
-    
     if (!profile) {
-      return NextResponse.json({ success: false, error: '프로필 없음', debug }, { status: 403 });
+      return NextResponse.json({ success: false, error: '프로필 없음' }, { status: 403 });
     }
 
     const body = await request.json();
@@ -36,6 +28,7 @@ export async function POST(request: NextRequest) {
     let allowedClassIds: string[] = [];
     
     if (profile.role === 'owner') {
+      // 원장은 모든 반
       const { data: allClasses } = await supabase
         .from('classes')
         .select('id')
@@ -44,34 +37,32 @@ export async function POST(request: NextRequest) {
       
       allowedClassIds = (allClasses || []).map(c => c.id);
     } else {
-      const { data: teacherClasses, error: tcError } = await supabase
+      // 교사는 담당 반만
+      const { data: teacherClasses } = await supabase
         .from('class_teachers')
         .select('class_id')
         .eq('teacher_id', user.id)
         .eq('is_active', true)
         .is('deleted_at', null);
       
-      debug.teacher_classes_raw = teacherClasses;
-      debug.teacher_classes_error = tcError?.message;
-      
       allowedClassIds = (teacherClasses || []).map(tc => tc.class_id);
     }
 
-    debug.step1_allowedClassIds = allowedClassIds;
-    debug.step1_count = allowedClassIds.length;
-
     if (allowedClassIds.length === 0) {
-      return NextResponse.json({ success: true, students: [], debug });
+      return NextResponse.json({ success: true, students: [] });
     }
 
+    // 특정 반 선택 시 권한 체크
     const targetClassIds = classId ? [classId] : allowedClassIds;
     const filteredClassIds = targetClassIds.filter(id => allowedClassIds.includes(id));
 
-    debug.step1b_filteredClassIds = filteredClassIds;
-
     if (filteredClassIds.length === 0) {
-      return NextResponse.json({ success: true, students: [], debug });
+      return NextResponse.json({ success: true, students: [] });
     }
+
+    // ============================================================================
+    // Plan B: enrollment_schedule_assignments 기준으로 학생 조회
+    // ============================================================================
 
     // 1. 해당 반들의 스케줄 조회
     const { data: schedules, error: schedulesError } = await supabase
@@ -82,20 +73,22 @@ export async function POST(request: NextRequest) {
       .eq('is_active', true)
       .is('deleted_at', null);
 
-    debug.step2_schedules = schedules;
-    debug.step2_count = schedules?.length || 0;
-    debug.step2_error = schedulesError?.message;
-
     if (schedulesError) {
-      return NextResponse.json({ success: false, error: schedulesError.message, debug }, { status: 500 });
+      console.error('Schedules query error:', schedulesError);
+      return NextResponse.json({ success: false, error: schedulesError.message }, { status: 500 });
     }
 
     if (!schedules || schedules.length === 0) {
-      return NextResponse.json({ success: true, students: [], debug });
+      return NextResponse.json({ success: true, students: [] });
     }
 
     const scheduleIds = schedules.map(s => s.id);
-    debug.step2_scheduleIds = scheduleIds;
+    
+    // schedule_id → class_id 매핑
+    const scheduleToClassMap: Record<string, string> = {};
+    for (const s of schedules) {
+      scheduleToClassMap[s.id] = s.class_id;
+    }
 
     // 2. 해당 스케줄들에 배정된 학생 조회
     const { data: assignments, error: assignmentsError } = await supabase
@@ -121,24 +114,20 @@ export async function POST(request: NextRequest) {
       .is('end_date', null)
       .is('deleted_at', null);
 
-    debug.step3_assignments_count = assignments?.length || 0;
-    debug.step3_error = assignmentsError?.message;
-
     if (assignmentsError) {
-      return NextResponse.json({ success: false, error: assignmentsError.message, debug }, { status: 500 });
+      console.error('Assignments query error:', assignmentsError);
+      return NextResponse.json({ success: false, error: assignmentsError.message }, { status: 500 });
     }
 
     // 3. 반 정보 조회
-    const { data: classes } = await supabase
+    const { data: classes, error: classesError } = await supabase
       .from('classes')
       .select('id, name, color')
       .in('id', filteredClassIds);
 
-    debug.step4_classes = classes;
-
-    const scheduleToClassMap: Record<string, string> = {};
-    for (const s of schedules) {
-      scheduleToClassMap[s.id] = s.class_id;
+    if (classesError) {
+      console.error('Classes query error:', classesError);
+      return NextResponse.json({ success: false, error: classesError.message }, { status: 500 });
     }
 
     const classMap: Record<string, { name: string; color: string | null }> = {};
@@ -146,8 +135,22 @@ export async function POST(request: NextRequest) {
       classMap[c.id] = { name: c.name, color: c.color };
     }
 
-    // 4. 학생 데이터 변환
-    const studentMap: Record<string, unknown> = {};
+    // 4. 학생 데이터 변환 (중복 제거: 같은 학생이 여러 스케줄에 있을 수 있음)
+    const studentMap: Record<string, {
+      id: string;
+      name: string;
+      phone: string | null;
+      parent_phone: string | null;
+      student_phone: string | null;
+      school: string | null;
+      grade: string | null;
+      address: string | null;
+      memo: string | null;
+      is_active: boolean;
+      class_id: string;
+      class_name: string;
+      class_color: string | null;
+    }> = {};
 
     for (const assignment of assignments || []) {
       const student = assignment.students as {
@@ -171,6 +174,7 @@ export async function POST(request: NextRequest) {
       const classInfo = classMap[classId];
       if (!classInfo) continue;
 
+      // 이미 있는 학생이면 스킵 (첫 번째 반 기준)
       if (studentMap[student.id]) continue;
 
       studentMap[student.id] = {
@@ -190,14 +194,13 @@ export async function POST(request: NextRequest) {
       };
     }
 
-    debug.step5_studentMap_count = Object.keys(studentMap).length;
-
+    // 5. 이름순 정렬
     const students = Object.values(studentMap)
-      .sort((a: any, b: any) => a.name.localeCompare(b.name, 'ko'));
+      .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
 
-    return NextResponse.json({ success: true, students, debug });
+    return NextResponse.json({ success: true, students });
   } catch (error) {
-    debug.catch_error = String(error);
-    return NextResponse.json({ success: false, error: '서버 오류', debug }, { status: 500 });
+    console.error('API error:', error);
+    return NextResponse.json({ success: false, error: '서버 오류' }, { status: 500 });
   }
 }
