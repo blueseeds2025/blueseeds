@@ -13,6 +13,9 @@ export {
   getPreviousProgressEntries,
   getPreviousProgressEntriesBatch,
   getSavedProgressEntries,
+  // 🚀 통합 API
+  getFeedPageSettings,
+  getFeedPageData,
 } from './feed-query.actions';
 
 // 저장

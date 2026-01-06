@@ -21,6 +21,7 @@ import {
   getSavedFeeds,
   getPreviousProgressBatch,
   getPreviousProgressEntriesBatch,
+  getFeedPageData,  // 🚀 통합 API
   saveFeed,
   saveAllFeedsBulk,
 } from '../actions/feed.actions';
@@ -156,7 +157,7 @@ export function useFeedRegular({
     return true;
   }
 
-  // 학생 및 피드 데이터 로드
+  // 학생 및 피드 데이터 로드 - 🚀 통합 API 사용
   useEffect(() => {
     // 설정이 로드되지 않았거나 classId가 없으면 대기
     if (!classId || !settingsLoaded) return;
@@ -166,42 +167,30 @@ export function useFeedRegular({
       setMakeupTicketMap({});
       
       try {
-        const [studentsResult, feedsResult] = await Promise.all([
-          getClassStudents(classId, date),
-          getSavedFeeds(classId, date),
-        ]);
+        // 🚀 통합 API 1회 호출
+        const result = await getFeedPageData(
+          classId,
+          date,
+          tenantSettings.progress_enabled,
+          textbooks.length > 0
+        );
         
-        if (!studentsResult.success || !studentsResult.data) {
-          toast.error('학생 목록을 불러오는데 실패했습니다');
+        if (!result.success || !result.data) {
+          toast.error('데이터를 불러오는데 실패했습니다');
           return;
         }
         
-        setStudents(studentsResult.data);
-        const savedFeeds = feedsResult.data || {};
+        const { students: loadedStudents, savedFeeds, previousProgressMap, previousProgressEntriesMap: prevEntriesMap } = result.data;
         
-        let previousProgressMap: Record<string, string> = {};
-        let prevProgressEntriesMap: Record<string, ProgressEntry[]> = {};
-        
-        if (tenantSettings.progress_enabled && studentsResult.data.length > 0) {
-          const studentIds = studentsResult.data.map(s => s.id);
-          
-          // 기존 텍스트 진도 (하위호환)
-          previousProgressMap = await getPreviousProgressBatch(studentIds, date);
-          
-          // 🆕 교재별 진도
-          if (textbooks.length > 0) {
-            prevProgressEntriesMap = await getPreviousProgressEntriesBatch(studentIds, date);
-          }
-        }
-        
-        setPreviousProgressEntriesMap(prevProgressEntriesMap);
+        setStudents(loadedStudents);
+        setPreviousProgressEntriesMap(prevEntriesMap);
         
         const newCardDataMap: Record<string, StudentCardData> = {};
         
-        for (const student of studentsResult.data) {
+        for (const student of loadedStudents) {
           const saved = savedFeeds[student.id];
           const previousProgress = previousProgressMap[student.id];
-          const prevEntries = prevProgressEntriesMap[student.id] || [];
+          const prevEntries = prevEntriesMap[student.id] || [];
           newCardDataMap[student.id] = createCardData(student, saved, previousProgress, prevEntries);
         }
         

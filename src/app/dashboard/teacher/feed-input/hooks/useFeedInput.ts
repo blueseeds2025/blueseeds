@@ -9,11 +9,7 @@ import {
   Textbook,  // 🆕 추가
 } from '../types';
 import {
-  getTeacherClasses,
-  getFeedOptionSets,
-  getExamTypes,
-  getTenantSettings,
-  getTextbooksForFeed,  // 🆕 추가
+  getFeedPageSettings,  // 🚀 통합 API
   searchMakeupStudents,
 } from '../actions/feed.actions';
 import { toast } from 'sonner';
@@ -58,31 +54,16 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
   // 🆕 설정 로드 완료 플래그
   const [settingsLoaded, setSettingsLoaded] = useState(false);
 
-  // 옵션 세트 및 테넌트 설정 로드
+  // 옵션 세트 및 테넌트 설정 로드 - 🚀 통합 API 사용
   useEffect(() => {
     async function loadSettings() {
-      const [optionsResult, examTypesResult, settingsResult, textbooksResult] = await Promise.all([
-        getFeedOptionSets(),
-        getExamTypes(),
-        getTenantSettings(),
-        getTextbooksForFeed(),
-      ]);
+      const result = await getFeedPageSettings();
       
-      if (optionsResult.success && optionsResult.data) {
-        setOptionSets(optionsResult.data);
-      }
-      
-      if (examTypesResult.success && examTypesResult.data) {
-        setExamTypes(examTypesResult.data);
-      }
-      
-      if (settingsResult.success && settingsResult.data) {
-        setTenantSettings(settingsResult.data);
-      }
-      
-      // 교재 목록 로드
-      if (textbooksResult.success && textbooksResult.data) {
-        setTextbooks(textbooksResult.data);
+      if (result.success && result.data) {
+        setOptionSets(result.data.optionSets);
+        setExamTypes(result.data.examTypes);
+        setTenantSettings(result.data.tenantSettings);
+        setTextbooks(result.data.textbooks);
       }
       
       // 🆕 설정 로드 완료

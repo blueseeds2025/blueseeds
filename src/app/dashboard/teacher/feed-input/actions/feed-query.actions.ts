@@ -928,3 +928,548 @@ export async function getSavedProgressEntries(
     return [];
   }
 }
+
+// ============================================================================
+// 🚀 통합 API: 피드 페이지 초기 설정 (1회 호출로 4개 → 1개)
+// ============================================================================
+
+export interface FeedPageSettings {
+  classes: ClassInfo[];
+  optionSets: FeedOptionSet[];
+  examTypes: ExamType[];
+  textbooks: Textbook[];
+  tenantSettings: TenantSettings;
+}
+
+export async function getFeedPageSettings(): Promise<{
+  success: boolean;
+  data?: FeedPageSettings;
+  error?: string;
+}> {
+  try {
+    const supabase = await createClient();
+    
+    // 인증 체크
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { success: false, error: '로그인이 필요합니다' };
+    }
+    
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('tenant_id, role')
+      .eq('id', user.id)
+      .single();
+    
+    if (!profile) {
+      return { success: false, error: '프로필을 찾을 수 없습니다' };
+    }
+    
+    const tenantId = profile.tenant_id;
+    
+    // 🚀 병렬로 모든 데이터 조회
+    const [
+      classesResult,
+      optionSetsResult,
+      examSetsResult,
+      textbooksResult,
+      tenantResult,
+      featuresResult,
+    ] = await Promise.all([
+      // 1. 반 목록
+      (async () => {
+        let query = supabase
+          .from('classes')
+          .select('id, name, color')
+          .eq('tenant_id', tenantId)
+          .is('deleted_at', null)
+          .order('name');
+        
+        if (profile.role === 'teacher') {
+          const { data: assignments } = await supabase
+            .from('class_teachers')
+            .select('class_id')
+            .eq('tenant_id', tenantId)
+            .eq('teacher_id', user.id)
+            .eq('is_active', true)
+            .is('deleted_at', null);
+          
+          const classIds = (assignments || [])
+            .map(a => a.class_id)
+            .filter((id): id is string => id !== null);
+          
+          if (classIds.length === 0) {
+            return { data: [], error: null };
+          }
+          
+          query = query.in('id', classIds);
+        }
+        
+        return query;
+      })(),
+      
+      // 2. 피드 옵션 세트 (normal 타입만)
+      supabase
+        .from('feed_option_sets')
+        .select('id, name, set_key, is_scored, is_required, type')
+        .eq('tenant_id', tenantId)
+        .eq('is_active', true)
+        .is('deleted_at', null)
+        .or('type.is.null,type.eq.normal')
+        .order('created_at'),
+      
+      // 3. 시험 타입 (exam_score 타입)
+      supabase
+        .from('feed_option_sets')
+        .select('id, name, set_key')
+        .eq('tenant_id', tenantId)
+        .eq('is_active', true)
+        .is('deleted_at', null)
+        .eq('type', 'exam_score')
+        .order('created_at'),
+      
+      // 4. 교재 목록
+      supabase
+        .from('textbooks')
+        .select('id, title, total_pages')
+        .eq('tenant_id', tenantId)
+        .eq('is_active', true)
+        .is('deleted_at', null)
+        .order('display_order', { ascending: true }),
+      
+      // 5. 테넌트 설정
+      supabase
+        .from('tenants')
+        .select('settings, plan, operation_mode')
+        .eq('id', tenantId)
+        .single(),
+      
+      // 6. 테넌트 기능
+      supabase
+        .from('tenant_features')
+        .select('feature_key')
+        .eq('tenant_id', tenantId)
+        .eq('is_enabled', true)
+        .is('deleted_at', null)
+        .or('expires_at.is.null,expires_at.gt.now()'),
+    ]);
+    
+    // 반 목록 처리
+    const classes: ClassInfo[] = (classesResult.data || []).map(c => ({
+      id: c.id,
+      name: c.name,
+      color: c.color ?? undefined,
+    }));
+    
+    // 옵션 세트 처리 (옵션도 한번에 조회)
+    const setIds = (optionSetsResult.data || []).map(s => s.id);
+    let allOptions: FeedOption[] = [];
+    
+    if (setIds.length > 0) {
+      const { data: optionsData } = await supabase
+        .from('feed_options')
+        .select('id, set_id, label, score, display_order')
+        .in('set_id', setIds)
+        .eq('is_active', true)
+        .is('deleted_at', null)
+        .order('display_order');
+      
+      allOptions = (optionsData || []).map(opt => ({
+        id: opt.id,
+        set_id: opt.set_id!,
+        label: opt.label,
+        score: opt.score,
+        display_order: opt.display_order ?? 0,
+      }));
+    }
+    
+    // 옵션셋별로 옵션 그룹핑
+    const optionsBySetId: Record<string, FeedOption[]> = {};
+    for (const opt of allOptions) {
+      if (!optionsBySetId[opt.set_id]) {
+        optionsBySetId[opt.set_id] = [];
+      }
+      optionsBySetId[opt.set_id].push(opt);
+    }
+    
+    const optionSets: FeedOptionSet[] = (optionSetsResult.data || []).map(set => ({
+      id: set.id,
+      name: set.name,
+      set_key: set.set_key,
+      is_scored: set.is_scored ?? false,
+      is_required: set.is_required ?? false,
+      options: optionsBySetId[set.id] || [],
+    }));
+    
+    // 시험 타입 처리
+    const examTypes: ExamType[] = (examSetsResult.data || []).map(s => ({
+      id: s.id,
+      name: s.name,
+      set_key: s.set_key,
+    }));
+    
+    // 교재 처리
+    const textbooks: Textbook[] = (textbooksResult.data || []).map(t => ({
+      id: t.id,
+      title: t.title,
+      total_pages: t.total_pages,
+    }));
+    
+    // 테넌트 설정 처리
+    const features = (featuresResult.data || [])
+      .map(f => f.feature_key)
+      .filter((key): key is string => key !== null);
+    
+    const settings = (tenantResult.data?.settings as Record<string, unknown>) || {};
+    
+    const tenantSettings: TenantSettings = {
+      progress_enabled: (settings.progress_enabled as boolean) ?? false,
+      materials_enabled: (settings.materials_enabled as boolean) ?? false,
+      exam_score_enabled: (settings.exam_score_enabled as boolean) ?? false,
+      makeup_defaults: (settings.makeup_defaults as Record<string, boolean>) ?? {
+        '병결': true,
+        '학교행사': true,
+        '가사': false,
+        '무단': false,
+        '기타': true,
+      },
+      plan: (tenantResult.data?.plan as 'basic' | 'premium' | 'enterprise') ?? 'basic',
+      features,
+      operation_mode: (tenantResult.data?.operation_mode as 'solo' | 'team') ?? 'solo',
+    };
+    
+    return {
+      success: true,
+      data: {
+        classes,
+        optionSets,
+        examTypes,
+        textbooks,
+        tenantSettings,
+      },
+    };
+  } catch (error) {
+    console.error('getFeedPageSettings error:', error);
+    return { success: false, error: '설정을 불러오는데 실패했습니다' };
+  }
+}
+
+// ============================================================================
+// 🚀 통합 API: 피드 페이지 데이터 (반/날짜별, 1회 호출로 4개 → 1개)
+// ============================================================================
+
+export interface FeedPageData {
+  students: ClassStudent[];
+  savedFeeds: Record<string, SavedFeedData>;
+  previousProgressMap: Record<string, string>;
+  previousProgressEntriesMap: Record<string, ProgressEntry[]>;
+}
+
+export async function getFeedPageData(
+  classId: string,
+  feedDate: string,
+  progressEnabled: boolean = false,
+  hasTextbooks: boolean = false
+): Promise<{
+  success: boolean;
+  data?: FeedPageData;
+  error?: string;
+}> {
+  try {
+    const supabase = await createClient();
+    
+    // 인증 체크
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { success: false, error: '로그인이 필요합니다' };
+    }
+    
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('tenant_id')
+      .eq('id', user.id)
+      .single();
+    
+    if (!profile) {
+      return { success: false, error: '프로필을 찾을 수 없습니다' };
+    }
+    
+    const tenantId = profile.tenant_id;
+    
+    // 요일 계산
+    const targetDate = new Date(feedDate + 'T00:00:00');
+    const dayOfWeek = targetDate.getDay();
+    
+    // 1. 해당 반의 해당 요일 스케줄 조회
+    const { data: schedules } = await supabase
+      .from('class_schedules')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('class_id', classId)
+      .eq('day_of_week', dayOfWeek)
+      .eq('is_active', true)
+      .is('deleted_at', null);
+    
+    if (!schedules || schedules.length === 0) {
+      return {
+        success: true,
+        data: {
+          students: [],
+          savedFeeds: {},
+          previousProgressMap: {},
+          previousProgressEntriesMap: {},
+        },
+      };
+    }
+    
+    const scheduleIds = schedules.map(s => s.id);
+    
+    // 2. 학생 목록 조회
+    const { data: assignmentsData } = await supabase
+      .from('enrollment_schedule_assignments')
+      .select(`
+        student_id,
+        students (
+          id,
+          name,
+          display_code
+        )
+      `)
+      .eq('tenant_id', tenantId)
+      .in('class_schedule_id', scheduleIds)
+      .is('end_date', null)
+      .is('deleted_at', null);
+    
+    const students: ClassStudent[] = (assignmentsData || [])
+      .filter(item => item.students)
+      .map(item => {
+        const s = item.students as { id: string; name: string; display_code: string | null };
+        return {
+          id: s.id,
+          name: s.name,
+          display_code: s.display_code ?? '',
+          class_id: classId,
+          is_makeup: false,
+        };
+      });
+    
+    if (students.length === 0) {
+      return {
+        success: true,
+        data: {
+          students: [],
+          savedFeeds: {},
+          previousProgressMap: {},
+          previousProgressEntriesMap: {},
+        },
+      };
+    }
+    
+    const studentIds = students.map(s => s.id);
+    
+    // 3. 시험 타입 ID 조회 (저장된 피드에서 exam_score 구분용)
+    const { data: examSets } = await supabase
+      .from('feed_option_sets')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('type', 'exam_score')
+      .is('deleted_at', null);
+    
+    const examSetIds = new Set((examSets || []).map(s => s.id));
+    
+    // 🚀 병렬로 나머지 데이터 조회
+    const [
+      savedFeedsResult,
+      feedValuesResult,
+      previousProgressResult,
+      previousEntriesResult,
+    ] = await Promise.all([
+      // 저장된 피드 기본 정보
+      supabase
+        .from('student_feeds')
+        .select(`
+          id,
+          student_id,
+          attendance_status,
+          absence_reason,
+          absence_reason_detail,
+          notify_parent,
+          is_makeup,
+          progress_text,
+          memo
+        `)
+        .eq('tenant_id', tenantId)
+        .eq('class_id', classId)
+        .eq('feed_date', feedDate)
+        .in('student_id', studentIds)
+        .is('deleted_at', null),
+      
+      // 피드 값
+      supabase
+        .from('student_feed_values')
+        .select('feed_id, set_id, option_id, score')
+        .in('feed_id', (
+          await supabase
+            .from('student_feeds')
+            .select('id')
+            .eq('tenant_id', tenantId)
+            .eq('class_id', classId)
+            .eq('feed_date', feedDate)
+            .in('student_id', studentIds)
+            .is('deleted_at', null)
+        ).data?.map(f => f.id) || [])
+        .is('deleted_at', null),
+      
+      // 이전 진도 (조건부)
+      progressEnabled
+        ? supabase
+            .from('student_feeds')
+            .select('student_id, progress_text, feed_date')
+            .eq('tenant_id', tenantId)
+            .in('student_id', studentIds)
+            .lt('feed_date', feedDate)
+            .not('progress_text', 'is', null)
+            .order('feed_date', { ascending: false })
+        : Promise.resolve({ data: [] }),
+      
+      // 이전 진도 엔트리 (조건부)
+      progressEnabled && hasTextbooks
+        ? supabase
+            .from('feed_progress_entries')
+            .select(`
+              student_id,
+              textbook_id,
+              end_page_int,
+              end_page_text,
+              feed_date,
+              textbooks (
+                id,
+                title,
+                total_pages
+              )
+            `)
+            .eq('tenant_id', tenantId)
+            .in('student_id', studentIds)
+            .lt('feed_date', feedDate)
+            .is('deleted_at', null)
+            .order('feed_date', { ascending: false })
+        : Promise.resolve({ data: [] }),
+    ]);
+    
+    // 저장된 피드 처리
+    const savedFeeds: Record<string, SavedFeedData> = {};
+    const feedIdToStudentId: Record<string, string> = {};
+    
+    for (const feed of savedFeedsResult.data || []) {
+      if (!feed.student_id) continue;
+      feedIdToStudentId[feed.id] = feed.student_id;
+      
+      // 메모 파싱
+      let memoValues: Record<string, string> = { 'default': '' };
+      if (feed.memo) {
+        try {
+          const parsed = JSON.parse(feed.memo);
+          if (typeof parsed === 'object' && parsed !== null) {
+            memoValues = parsed;
+          } else if (typeof parsed === 'string') {
+            memoValues = { 'default': parsed };
+          }
+        } catch {
+          memoValues = { 'default': feed.memo };
+        }
+      }
+      
+      savedFeeds[feed.student_id] = {
+        id: feed.id,
+        attendanceStatus: (feed.attendance_status as 'present' | 'absent' | 'late') ?? 'present',
+        absenceReason: feed.absence_reason ?? undefined,
+        absenceReasonDetail: feed.absence_reason_detail ?? undefined,
+        notifyParent: feed.notify_parent ?? false,
+        isMakeup: feed.is_makeup ?? false,
+        progressText: feed.progress_text ?? undefined,
+        memoValues,
+        feedValues: [],
+        examScores: [],
+      };
+    }
+    
+    // 피드 값 처리
+    for (const value of feedValuesResult.data || []) {
+      if (!value.feed_id || !value.set_id) continue;
+      
+      const studentId = feedIdToStudentId[value.feed_id];
+      if (!studentId || !savedFeeds[studentId]) continue;
+      
+      if (examSetIds.has(value.set_id)) {
+        // 시험 점수
+        if (value.score !== null) {
+          savedFeeds[studentId].examScores = savedFeeds[studentId].examScores || [];
+          savedFeeds[studentId].examScores!.push({
+            setId: value.set_id,
+            score: value.score,
+          });
+        }
+      } else {
+        // 일반 피드 값
+        if (value.option_id) {
+          savedFeeds[studentId].feedValues.push({
+            setId: value.set_id,
+            optionId: value.option_id,
+          });
+        }
+      }
+    }
+    
+    // 이전 진도 처리
+    const previousProgressMap: Record<string, string> = {};
+    for (const row of previousProgressResult.data || []) {
+      if (!row.student_id || previousProgressMap[row.student_id]) continue;
+      if (row.progress_text) {
+        previousProgressMap[row.student_id] = row.progress_text;
+      }
+    }
+    
+    // 이전 진도 엔트리 처리
+    const previousProgressEntriesMap: Record<string, ProgressEntry[]> = {};
+    const seenTextbooks: Record<string, Set<string>> = {};
+    
+    for (const row of previousEntriesResult.data || []) {
+      if (!row.student_id || !row.textbook_id) continue;
+      
+      if (!seenTextbooks[row.student_id]) {
+        seenTextbooks[row.student_id] = new Set();
+      }
+      
+      if (seenTextbooks[row.student_id].has(row.textbook_id)) continue;
+      seenTextbooks[row.student_id].add(row.textbook_id);
+      
+      const textbook = row.textbooks as { id: string; title: string; total_pages: number | null } | null;
+      if (!textbook) continue;
+      
+      if (!previousProgressEntriesMap[row.student_id]) {
+        previousProgressEntriesMap[row.student_id] = [];
+      }
+      
+      previousProgressEntriesMap[row.student_id].push({
+        textbookId: textbook.id,
+        textbookTitle: textbook.title,
+        totalPages: textbook.total_pages,
+        endPageInt: row.end_page_int,
+        endPageText: row.end_page_text || '',
+      });
+    }
+    
+    return {
+      success: true,
+      data: {
+        students,
+        savedFeeds,
+        previousProgressMap,
+        previousProgressEntriesMap,
+      },
+    };
+  } catch (error) {
+    console.error('getFeedPageData error:', error);
+    return { success: false, error: '데이터를 불러오는데 실패했습니다' };
+  }
+}
