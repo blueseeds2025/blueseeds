@@ -372,6 +372,7 @@ export async function getSavedFeeds(
       return { success: false, error: '프로필을 찾을 수 없습니다' };
     }
     
+    // ✅ student_feeds에는 deleted_at 컬럼이 없으므로 조건 제거
     const { data: feeds, error: feedsError } = await supabase
       .from('student_feeds')
       .select(`
@@ -396,6 +397,7 @@ export async function getSavedFeeds(
     const feedValuesMap: Record<string, { set_id: string | null; option_id: string | null; score: number | null }[]> = {};
     
     if (feedIds.length > 0) {
+      // ✅ feed_values에는 deleted_at 컬럼이 없으므로 조건 제거
       const { data: values, error: valuesError } = await supabase
         .from('feed_values')
         .select('feed_id, set_id, option_id, score')
@@ -605,6 +607,7 @@ export async function getPreviousProgress(
     
     if (!profile) return null;
     
+    // ✅ student_feeds에는 deleted_at 컬럼이 없으므로 조건 제거
     const { data } = await supabase
       .from('student_feeds')
       .select('progress_text')
@@ -647,6 +650,7 @@ export async function getPreviousProgressBatch(
     
     if (!profile) return {};
     
+    // ✅ student_feeds에는 deleted_at 컬럼이 없으므로 조건 제거
     const { data, error } = await supabase
       .from('student_feeds')
       .select('student_id, progress_text, feed_date')
@@ -1277,50 +1281,42 @@ export async function getFeedPageData(
     
     const examSetIds = new Set((examSets || []).map(s => s.id));
     
+    // ✅ student_feeds 먼저 조회해서 feedIds 확보
+    const { data: savedFeedsData } = await supabase
+      .from('student_feeds')
+      .select(`
+        id,
+        student_id,
+        attendance_status,
+        absence_reason,
+        absence_reason_detail,
+        notify_parent,
+        is_makeup,
+        progress_text,
+        memo_values
+      `)
+      .eq('tenant_id', tenantId)
+      .eq('class_id', classId)
+      .eq('feed_date', feedDate)
+      .in('student_id', studentIds);
+    
+    const feedIds = (savedFeedsData || []).map(f => f.id);
+    
     // 🚀 병렬로 나머지 데이터 조회
     const [
-      savedFeedsResult,
       feedValuesResult,
       previousProgressResult,
       previousEntriesResult,
     ] = await Promise.all([
-      // 저장된 피드 기본 정보
-      supabase
-        .from('student_feeds')
-        .select(`
-          id,
-          student_id,
-          attendance_status,
-          absence_reason,
-          absence_reason_detail,
-          notify_parent,
-          is_makeup,
-          progress_text,
-          memo
-        `)
-        .eq('tenant_id', tenantId)
-        .eq('class_id', classId)
-        .eq('feed_date', feedDate)
-        .in('student_id', studentIds)
-        .is('deleted_at', null),
+      // ✅ feed_values에는 deleted_at 컬럼이 없으므로 조건 제거
+      feedIds.length > 0
+        ? supabase
+            .from('feed_values')
+            .select('feed_id, set_id, option_id, score')
+            .in('feed_id', feedIds)
+        : Promise.resolve({ data: [] }),
       
-      // 피드 값
-      supabase
-        .from('feed_values')
-        .select('feed_id, set_id, option_id, score')
-        .in('feed_id', (
-          await supabase
-            .from('student_feeds')
-            .select('id')
-            .eq('tenant_id', tenantId)
-            .eq('class_id', classId)
-            .eq('feed_date', feedDate)
-            .in('student_id', studentIds)
-            .is('deleted_at', null)
-        ).data?.map(f => f.id) || [])
-     
-      
-      // 이전 진도 (조건부)
+      // 이전 진도 (조건부) - ✅ student_feeds에는 deleted_at 없음
       progressEnabled
         ? supabase
             .from('student_feeds')
@@ -1360,22 +1356,27 @@ export async function getFeedPageData(
     const savedFeeds: Record<string, SavedFeedData> = {};
     const feedIdToStudentId: Record<string, string> = {};
     
-    for (const feed of savedFeedsResult.data || []) {
+    for (const feed of savedFeedsData || []) {
       if (!feed.student_id) continue;
       feedIdToStudentId[feed.id] = feed.student_id;
       
       // 메모 파싱
       let memoValues: Record<string, string> = { 'default': '' };
-      if (feed.memo) {
-        try {
-          const parsed = JSON.parse(feed.memo);
-          if (typeof parsed === 'object' && parsed !== null) {
-            memoValues = parsed;
-          } else if (typeof parsed === 'string') {
-            memoValues = { 'default': parsed };
+      const memoData = feed.memo_values;
+      if (memoData) {
+        if (typeof memoData === 'object' && memoData !== null) {
+          memoValues = memoData as Record<string, string>;
+        } else if (typeof memoData === 'string') {
+          try {
+            const parsed = JSON.parse(memoData);
+            if (typeof parsed === 'object' && parsed !== null) {
+              memoValues = parsed;
+            } else if (typeof parsed === 'string') {
+              memoValues = { 'default': parsed };
+            }
+          } catch {
+            memoValues = { 'default': memoData };
           }
-        } catch {
-          memoValues = { 'default': feed.memo };
         }
       }
       
