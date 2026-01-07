@@ -1306,7 +1306,7 @@ export async function getFeedPageData(
       
       // 피드 값
       supabase
-        .from('student_feed_values')
+        .from('feed_values')
         .select('feed_id, set_id, option_id, score')
         .in('feed_id', (
           await supabase
@@ -1318,7 +1318,7 @@ export async function getFeedPageData(
             .in('student_id', studentIds)
             .is('deleted_at', null)
         ).data?.map(f => f.id) || [])
-        .is('deleted_at', null),
+     
       
       // 이전 진도 (조건부)
       progressEnabled
