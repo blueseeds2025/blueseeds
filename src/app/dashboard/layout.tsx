@@ -5,6 +5,12 @@ import { AuthProvider, AuthUser } from '@/lib/auth-context';
 import { DashboardSidebar, DashboardContent } from './components/DashboardSidebar';
 
 // ============================================================================
+// 🆕 캐시 방지 - 사용자별 데이터가 섞이는 것 방지
+// ============================================================================
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+// ============================================================================
 // Server Component - 서버에서 인증 정보 조회
 // ============================================================================
 
@@ -22,14 +28,21 @@ export default async function DashboardLayout({
     redirect('/auth/login');
   }
   
-  // 서버에서 프로필 조회 (1회만)
-  const { data: profile } = await supabase
+  // 🆕 서버에서 프로필 조회 + error 처리
+  const { data: profile, error } = await supabase
     .from('profiles')
     .select('tenant_id, role, display_name')
     .eq('id', user.id)
     .single();
   
-  if (!profile) {
+  // 🆕 error 또는 profile 없으면 리다이렉트
+  if (error || !profile) {
+    redirect('/auth/login');
+  }
+  
+  // 🆕 role 런타임 검증 (캐스팅만 하면 위험)
+  const role = profile.role;
+  if (role !== 'owner' && role !== 'teacher') {
     redirect('/auth/login');
   }
   
@@ -37,7 +50,7 @@ export default async function DashboardLayout({
   const authUser: AuthUser = {
     userId: user.id,
     tenantId: profile.tenant_id,
-    role: profile.role as 'owner' | 'teacher',
+    role: role,  // 🆕 검증된 role 사용
     displayName: profile.display_name || '',
   };
 

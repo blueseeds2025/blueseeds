@@ -1,17 +1,15 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import {
   ClassStudent,
   FeedOptionSet,
   ExamType,
   TenantSettings,
-  Textbook,  // 🆕 추가
+  Textbook,
+  SavedFeedData,
+  ProgressEntry,
 } from '../types';
-import {
-  getFeedPageSettings,  // 🚀 통합 API
-  searchMakeupStudents,
-} from '../actions/feed.actions';
 import { toast } from 'sonner';
 
 // 분리된 훅들
@@ -20,59 +18,56 @@ import { useMemoFields } from './useMemoFields';
 import { useFeedRegular } from './useFeedRegular';
 import { useFeedMakeup } from './useFeedMakeup';
 
+// ============================================================================
+// Props 타입 - 서버에서 받은 초기 데이터 포함
+// ============================================================================
+
 interface UseFeedInputProps {
   classId: string;
   date: string;
   teacherId: string;
   tenantId: string;
+  // 🆕 서버에서 받은 정적 데이터
+  initialOptionSets: FeedOptionSet[];
+  initialExamTypes: ExamType[];
+  initialTextbooks: Textbook[];
+  initialTenantSettings: TenantSettings;
+  // 🆕 서버에서 받은 동적 데이터 (초기값)
+  initialStudents: ClassStudent[];
+  initialSavedFeeds: Record<string, SavedFeedData>;
+  initialPreviousProgressMap: Record<string, string>;
+  initialPreviousProgressEntriesMap: Record<string, ProgressEntry[]>;
+  // 🆕 초기 classId/date (서버에서 데이터 가져온 기준)
+  serverClassId: string;
+  serverDate: string;
 }
 
-export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInputProps) {
-  // 공통 설정
-  const [optionSets, setOptionSets] = useState<FeedOptionSet[]>([]);
-  const [examTypes, setExamTypes] = useState<ExamType[]>([]);
-  const [textbooks, setTextbooks] = useState<Textbook[]>([]);  // 🆕 추가
-  const [tenantSettings, setTenantSettings] = useState<TenantSettings>({
-    progress_enabled: false,
-    materials_enabled: false,
-    exam_score_enabled: false,  // 🆕 추가
-    makeup_defaults: {
-      '병결': true,
-      '학교행사': true,
-      '가사': false,
-      '무단': false,
-      '기타': true,
-    },
-    plan: 'basic',
-    features: [],
-    operation_mode: 'solo',
-  });
+export function useFeedInput({
+  classId,
+  date,
+  teacherId,
+  tenantId,
+  initialOptionSets,
+  initialExamTypes,
+  initialTextbooks,
+  initialTenantSettings,
+  initialStudents,
+  initialSavedFeeds,
+  initialPreviousProgressMap,
+  initialPreviousProgressEntriesMap,
+  serverClassId,
+  serverDate,
+}: UseFeedInputProps) {
+  // ✅ 서버에서 받은 정적 데이터 그대로 사용 (useEffect 제거)
+  const optionSets = initialOptionSets;
+  const examTypes = initialExamTypes;
+  const textbooks = initialTextbooks;
+  const tenantSettings = initialTenantSettings;
   
   // 보강 티켓 맵 (정규/보강 훅에서 공유)
   const [makeupTicketMap, setMakeupTicketMap] = useState<Record<string, string>>({});
-  
-  // 🆕 설정 로드 완료 플래그
-  const [settingsLoaded, setSettingsLoaded] = useState(false);
 
-  // 옵션 세트 및 테넌트 설정 로드 - 🚀 통합 API 사용
-  useEffect(() => {
-    async function loadSettings() {
-      const result = await getFeedPageSettings();
-      
-      if (result.success && result.data) {
-        setOptionSets(result.data.optionSets);
-        setExamTypes(result.data.examTypes);
-        setTenantSettings(result.data.tenantSettings);
-        setTextbooks(result.data.textbooks);
-      }
-      
-      // 🆕 설정 로드 완료
-      setSettingsLoaded(true);
-    }
-    loadSettings();
-  }, []);
-
-  // 정규 피드 훅
+  // 정규 피드 훅 - 🆕 서버 초기 데이터 전달
   const regularFeed = useFeedRegular({
     classId,
     date,
@@ -80,9 +75,15 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
     examTypes,
     textbooks,
     tenantSettings,
-    settingsLoaded,  // 🆕 추가
     makeupTicketMap,
     setMakeupTicketMap,
+    // 🆕 서버 초기 데이터
+    initialStudents,
+    initialSavedFeeds,
+    initialPreviousProgressMap,
+    initialPreviousProgressEntriesMap,
+    serverClassId,
+    serverDate,
   });
 
   // 메모 필드 훅
@@ -119,10 +120,9 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
       feedValues[set.id] = null;
     });
     
-    // 🆕 시험 점수 초기화
-    const examScores: Record<string, number | null> = {};
+    const examScoresInit: Record<string, number | null> = {};
     examTypes.forEach(exam => {
-      examScores[exam.id] = null;
+      examScoresInit[exam.id] = null;
     });
     
     regularFeed.setCardDataMap(prev => ({
@@ -137,9 +137,9 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
         notifyParent: false,
         progressText: undefined,
         previousProgress: undefined,
-        progressEntries: [],  // 🆕 추가
+        progressEntries: [],
         feedValues,
-        examScores,
+        examScores: examScoresInit,
         memoValues: { 'default': '' },
         materials: [],
         status: 'empty',
@@ -158,9 +158,9 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
     cardDataMap: regularFeed.cardDataMap,
     optionSets,
     examTypes,
-    textbooks,  // 🆕 추가
+    textbooks,
     tenantSettings,
-    previousProgressEntriesMap: regularFeed.previousProgressEntriesMap,  // 🆕 추가
+    previousProgressEntriesMap: regularFeed.previousProgressEntriesMap,
     
     // 바텀시트
     bottomSheet: bottomSheetHook.bottomSheet,
@@ -173,8 +173,8 @@ export function useFeedInput({ classId, date, teacherId, tenantId }: UseFeedInpu
     handleNotifyParentChange: regularFeed.handleNotifyParentChange,
     handleNeedsMakeupChange: regularFeed.handleNeedsMakeupChange,
     handleProgressChange: regularFeed.handleProgressChange,
-    handleProgressEntriesChange: regularFeed.handleProgressEntriesChange,  // 🆕 추가
-    handleApplyProgressToAll: regularFeed.handleApplyProgressToAll,  // 🆕 진도 반 전체 적용
+    handleProgressEntriesChange: regularFeed.handleProgressEntriesChange,
+    handleApplyProgressToAll: regularFeed.handleApplyProgressToAll,
     handleMemoChange: regularFeed.handleMemoChange,
     handleFeedValueChange: regularFeed.handleFeedValueChange,
     handleExamScoreChange: regularFeed.handleExamScoreChange,

@@ -6,24 +6,61 @@ import StudentCard from './components/StudentCard';
 import FeedOptionPicker from './components/FeedOptionPicker';
 import { useFeedInput } from './hooks/useFeedInput';
 import { formatDisplayDate, getGridClass, calculateGridColumns } from './constants';
-import { FeedOption, AttendanceStatus, ProgressEntry } from './types';
-
+import { 
+  FeedOption, 
+  AttendanceStatus, 
+  ProgressEntry,
+  FeedOptionSet,
+  ExamType,
+  Textbook,
+  TenantSettings,
+  ClassStudent,
+  SavedFeedData,
+} from './types';
 interface FeedInputClientProps {
-  initialClasses: { id: string; name: string }[];
+  // 정적 데이터 (변하지 않음)
+  initialClasses: { id: string; name: string; color?: string }[];
+  initialOptionSets: FeedOptionSet[];
+  initialExamTypes: ExamType[];
+  initialTextbooks: Textbook[];
+  initialTenantSettings: TenantSettings;
+  // 동적 데이터 (초기값)
+  initialClassId: string;
+  initialDate: string;
+  initialStudents: ClassStudent[];
+  initialSavedFeeds: Record<string, SavedFeedData>;
+  initialPreviousProgressMap: Record<string, string>;
+  initialPreviousProgressEntriesMap: Record<string, ProgressEntry[]>;
+  // 사용자 정보
   teacherId: string;
   tenantId: string;
 }
 
 export default function FeedInputClient({
+  // 정적 데이터
   initialClasses,
+  initialOptionSets,
+  initialExamTypes,
+  initialTextbooks,
+  initialTenantSettings,
+  // 동적 데이터
+  initialClassId,
+  initialDate,
+  initialStudents,
+  initialSavedFeeds,
+  initialPreviousProgressMap,
+  initialPreviousProgressEntriesMap,
+  // 사용자 정보
   teacherId,
   tenantId,
 }: FeedInputClientProps) {
   const classes = initialClasses || [];
   
+  // 🆕 today는 max용으로만 사용
   const today = new Date().toISOString().split('T')[0];
-  const [selectedDate, setSelectedDate] = useState(today);
-  const [selectedClassId, setSelectedClassId] = useState(classes[0]?.id || '');
+  // 🆕 서버에서 받은 초기값 사용
+  const [selectedDate, setSelectedDate] = useState(initialDate);
+  const [selectedClassId, setSelectedClassId] = useState(initialClassId);
   const [gridClass, setGridClass] = useState('grid-cols-3');
   const containerRef = useRef<HTMLDivElement>(null);
   
@@ -123,11 +160,24 @@ export default function FeedInputClient({
     handleScheduleTicket,
     handleCancelTicket,
     processingTicketId,
-  } = useFeedInput({
+   } = useFeedInput({
     classId: selectedClassId,
     date: selectedDate,
     teacherId,
     tenantId,
+    // 🆕 서버에서 받은 정적 데이터
+    initialOptionSets,
+    initialExamTypes,
+    initialTextbooks,
+    initialTenantSettings,
+    // 🆕 서버에서 받은 동적 데이터
+    initialStudents,
+    initialSavedFeeds,
+    initialPreviousProgressMap,
+    initialPreviousProgressEntriesMap,
+    // 🆕 서버에서 데이터 가져온 기준
+    serverClassId: initialClassId,
+    serverDate: initialDate,
   });
   
   // 그리드 컬럼 계산

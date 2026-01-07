@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import {
   ClassStudent,
@@ -17,15 +17,15 @@ import {
   Textbook,
 } from '../types';
 import {
-  getClassStudents,
-  getSavedFeeds,
-  getPreviousProgressBatch,
-  getPreviousProgressEntriesBatch,
-  getFeedPageData,  // 🚀 통합 API
+  getFeedPageData,
   saveFeed,
   saveAllFeedsBulk,
 } from '../actions/feed.actions';
 import { generateIdempotencyKey, TOAST_MESSAGES } from '../constants';
+
+// ============================================================================
+// Props 타입 - 서버 초기 데이터 포함
+// ============================================================================
 
 interface UseFeedRegularProps {
   classId: string;
@@ -34,9 +34,15 @@ interface UseFeedRegularProps {
   examTypes: ExamType[];
   textbooks: Textbook[];
   tenantSettings: TenantSettings;
-  settingsLoaded: boolean;  // 🆕 추가
   makeupTicketMap: Record<string, string>;
   setMakeupTicketMap: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  // 🆕 서버에서 받은 초기 데이터
+  initialStudents: ClassStudent[];
+  initialSavedFeeds: Record<string, SavedFeedData>;
+  initialPreviousProgressMap: Record<string, string>;
+  initialPreviousProgressEntriesMap: Record<string, ProgressEntry[]>;
+  serverClassId: string;
+  serverDate: string;
 }
 
 export function useFeedRegular({
@@ -46,10 +52,18 @@ export function useFeedRegular({
   examTypes,
   textbooks,
   tenantSettings,
-  settingsLoaded,  // 🆕 추가
   makeupTicketMap,
   setMakeupTicketMap,
+  initialStudents,
+  initialSavedFeeds,
+  initialPreviousProgressMap,
+  initialPreviousProgressEntriesMap,
+  serverClassId,
+  serverDate,
 }: UseFeedRegularProps) {
+  // 🆕 초기화 완료 플래그 (서버 데이터로 한 번만 초기화)
+  const isInitialized = useRef(false);
+  
   // 학생 및 피드 데이터
   const [students, setStudents] = useState<ClassStudent[]>([]);
   const [cardDataMap, setCardDataMap] = useState<Record<string, StudentCardData>>({});
@@ -75,11 +89,10 @@ export function useFeedRegular({
   ): StudentCardData {
     const feedValues: Record<string, string | null> = {};
     optionSets.forEach(set => {
-      const savedValue = saved?.feedValues.find(v => v.setId === set.id);
+      const savedValue = saved?.feedValues?.find(v => v.setId === set.id);
       feedValues[set.id] = savedValue?.optionId || null;
     });
     
-    // 🆕 시험 점수 초기화
     const examScores: Record<string, number | null> = {};
     examTypes.forEach(exam => {
       const savedScore = saved?.examScores?.find(e => e.setId === exam.id);
@@ -100,7 +113,7 @@ export function useFeedRegular({
       notifyParent: saved?.notifyParent || false,
       progressText: saved?.progressText,
       previousProgress,
-      progressEntries: saved?.progressEntries || [],  // 🆕 저장된 진도 적용
+      progressEntries: saved?.progressEntries || [],
       feedValues,
       examScores,
       memoValues,
@@ -120,7 +133,6 @@ export function useFeedRegular({
       return 'dirty';
     }
     
-    // 분업형(team)이 아니면 필수 체크 (담임형은 전부 필수)
     if (tenantSettings.operation_mode !== 'team') {
       for (const set of optionSets) {
         if (!data.feedValues[set.id]) {
@@ -129,26 +141,22 @@ export function useFeedRegular({
       }
     }
     
-    // 🆕 진도 필수 체크는 저장 시점에 별도로 수행 (validateBeforeSave)
-    
     if (!data.isDirty && data.savedData) return 'saved';
     return 'dirty';
   }
   
-  // 🆕 저장 전 진도 유효성 검사
+  // 저장 전 진도 유효성 검사
   function validateProgressBeforeSave(data: StudentCardData): boolean {
     if (!tenantSettings.progress_enabled || textbooks.length === 0) {
-      return true;  // 진도 기능 꺼져있으면 통과
+      return true;
     }
     
     const entries = data.progressEntries ?? [];
     
-    // 교재가 최소 1개 선택되어야 함
     if (entries.length === 0) {
       return false;
     }
     
-    // 선택된 교재 중 페이지 입력 안 된 게 있으면 실패
     const hasEmptyProgress = entries.some(e => !e.endPageText?.trim());
     if (hasEmptyProgress) {
       return false;
@@ -157,30 +165,55 @@ export function useFeedRegular({
     return true;
   }
 
-  // 학생 및 피드 데이터 로드 - 🚀 통합 API 사용
+  // ============================================================================
+  // 🆕 서버 초기 데이터로 초기화 OR 반/날짜 변경 시 fetch
+  // ============================================================================
+  
   useEffect(() => {
-    // 설정이 로드되지 않았거나 classId가 없으면 대기
-    if (!classId || !settingsLoaded) return;
+    // classId 없으면 대기
+    if (!classId) return;
     
-    async function loadStudentsAndFeeds() {
+    async function loadData() {
       setIsLoading(true);
       setMakeupTicketMap({});
       
+      // 🆕 서버에서 가져온 반/날짜와 현재 선택된 반/날짜가 같으면 초기 데이터 사용
+      const useInitialData = !isInitialized.current && 
+        classId === serverClassId && 
+        date === serverDate;
+      
       try {
-        // 🚀 통합 API 1회 호출
-        const result = await getFeedPageData(
-          classId,
-          date,
-          tenantSettings.progress_enabled,
-          textbooks.length > 0
-        );
+        let loadedStudents: ClassStudent[];
+        let savedFeeds: Record<string, SavedFeedData>;
+        let previousProgressMap: Record<string, string>;
+        let prevEntriesMap: Record<string, ProgressEntry[]>;
         
-        if (!result.success || !result.data) {
-          toast.error('데이터를 불러오는데 실패했습니다');
-          return;
+        if (useInitialData) {
+          // ✅ 서버 초기 데이터 사용 (fetch 없음!)
+          loadedStudents = initialStudents;
+          savedFeeds = initialSavedFeeds as Record<string, SavedFeedData>;
+          previousProgressMap = initialPreviousProgressMap;
+          prevEntriesMap = initialPreviousProgressEntriesMap;
+          isInitialized.current = true;
+        } else {
+          // 🔄 반/날짜가 바뀌었으면 서버에서 새로 fetch
+          const result = await getFeedPageData(
+            classId,
+            date,
+            tenantSettings.progress_enabled,
+            textbooks.length > 0
+          );
+          
+          if (!result.success || !result.data) {
+            toast.error('데이터를 불러오는데 실패했습니다');
+            return;
+          }
+          
+          loadedStudents = result.data.students;
+          savedFeeds = result.data.savedFeeds;
+          previousProgressMap = result.data.previousProgressMap;
+          prevEntriesMap = result.data.previousProgressEntriesMap;
         }
-        
-        const { students: loadedStudents, savedFeeds, previousProgressMap, previousProgressEntriesMap: prevEntriesMap } = result.data;
         
         setStudents(loadedStudents);
         setPreviousProgressEntriesMap(prevEntriesMap);
@@ -200,8 +233,8 @@ export function useFeedRegular({
       }
     }
     
-    loadStudentsAndFeeds();
-  }, [classId, date, settingsLoaded]); // 설정 로드 완료 후 한 번만 실행
+    loadData();
+  }, [classId, date]); // 🆕 settingsLoaded 제거, classId/date만 의존
 
   // 페이지 이탈 방지
   useEffect(() => {
@@ -231,7 +264,7 @@ export function useFeedRegular({
       
       return { ...prev, [studentId]: updated };
     });
-  }, [optionSets]);
+  }, [optionSets, tenantSettings]);
 
   // 출결 변경
   const handleAttendanceChange = useCallback((
@@ -263,66 +296,62 @@ export function useFeedRegular({
     updateCardData(studentId, { needsMakeup });
   }, [updateCardData]);
 
-  // 진도 변경 (기존 텍스트)
-  const handleProgressChange = useCallback((studentId: string, progress: string) => {
-    updateCardData(studentId, { progressText: progress });
+  // 진도 변경 (텍스트)
+  const handleProgressChange = useCallback((studentId: string, text: string) => {
+    updateCardData(studentId, { progressText: text });
   }, [updateCardData]);
 
-  // 🆕 진도 변경 (교재별)
+  // 진도 변경 (교재별)
   const handleProgressEntriesChange = useCallback((studentId: string, entries: ProgressEntry[]) => {
     updateCardData(studentId, { progressEntries: entries });
   }, [updateCardData]);
 
-  // 🆕 진도 반 전체 적용 (그룹 수업용)
-  const handleApplyProgressToAll = useCallback((sourceStudentId: string, entries: ProgressEntry[]) => {
-    if (entries.length === 0) return;
+  // 진도 반 전체 적용
+  const handleApplyProgressToAll = useCallback((sourceStudentId: string) => {
+    const sourceCard = cardDataMap[sourceStudentId];
+    if (!sourceCard) return;
+    
+    const sourceEntries = sourceCard.progressEntries || [];
+    if (sourceEntries.length === 0) {
+      toast.error('적용할 진도가 없습니다');
+      return;
+    }
     
     setCardDataMap(prev => {
       const updated = { ...prev };
-      
-      Object.keys(updated).forEach(studentId => {
-        // 원본 학생은 건너뛰기
-        if (studentId === sourceStudentId) return;
-        
-        const current = updated[studentId];
-        if (!current) return;
-        
-        // 결석 학생은 건너뛰기
-        if (current.attendanceStatus === 'absent') return;
-        
-        // 진도 복사 (deep copy)
-        const copiedEntries = entries.map(e => ({ ...e }));
+      for (const studentId of Object.keys(updated)) {
+        if (studentId === sourceStudentId) continue;
+        if (updated[studentId].attendanceStatus === 'absent') continue;
         
         updated[studentId] = {
-          ...current,
-          progressEntries: copiedEntries,
+          ...updated[studentId],
+          progressEntries: [...sourceEntries],
           isDirty: true,
-          status: calculateCardStatus({ ...current, progressEntries: copiedEntries, isDirty: true }),
         };
-      });
-      
+        updated[studentId].status = calculateCardStatus(updated[studentId]);
+      }
       return updated;
     });
     
-    toast.success('모든 학생에게 진도가 적용되었습니다');
-  }, []);
+    toast.success('진도가 반 전체에 적용되었습니다');
+  }, [cardDataMap]);
 
   // 메모 변경
-  const handleMemoChange = useCallback((studentId: string, fieldId: string, value: string) => {
+  const handleMemoChange = useCallback((studentId: string, key: string, value: string) => {
     setCardDataMap(prev => {
       const current = prev[studentId];
       if (!current) return prev;
       
       const updated = {
         ...current,
-        memoValues: { ...current.memoValues, [fieldId]: value },
+        memoValues: { ...current.memoValues, [key]: value },
         isDirty: true,
       };
       updated.status = calculateCardStatus(updated);
       
       return { ...prev, [studentId]: updated };
     });
-  }, [optionSets]);
+  }, []);
 
   // 피드 값 변경
   const handleFeedValueChange = useCallback((
@@ -345,7 +374,7 @@ export function useFeedRegular({
     });
   }, [optionSets]);
 
-  // 🆕 시험 점수 변경
+  // 시험 점수 변경
   const handleExamScoreChange = useCallback((
     studentId: string,
     setId: string,
@@ -371,7 +400,6 @@ export function useFeedRegular({
     const cardData = cardDataMap[studentId];
     if (!cardData) return;
     
-    // 🆕 진도 검사 (저장 시점에)
     if (cardData.attendanceStatus !== 'absent' && !validateProgressBeforeSave(cardData)) {
       toast.error('진도를 입력해주세요');
       return;
@@ -388,7 +416,6 @@ export function useFeedRegular({
     const isMakeupSession = !!ticketId;
     
     try {
-      // 🆕 시험 점수 추출 (null이 아닌 것만)
       const examScores = Object.entries(cardData.examScores)
         .filter(([_, score]) => score !== null && score !== undefined)
         .map(([setId, score]) => ({ setId, score: score! }));
@@ -406,7 +433,7 @@ export function useFeedRegular({
         sessionType: isMakeupSession ? 'makeup' : 'regular',
         makeupTicketId: ticketId,
         progressText: cardData.attendanceStatus !== 'absent' ? cardData.progressText : undefined,
-        progressEntries: cardData.attendanceStatus !== 'absent' ? cardData.progressEntries : [],  // 🆕 추가
+        progressEntries: cardData.attendanceStatus !== 'absent' ? cardData.progressEntries : [],
         memoValues: cardData.memoValues,
         feedValues: cardData.attendanceStatus !== 'absent'
           ? Object.entries(cardData.feedValues)
@@ -440,7 +467,7 @@ export function useFeedRegular({
               feedValues: Object.entries(cardData.feedValues)
                 .filter(([_, optionId]) => optionId)
                 .map(([setId, optionId]) => ({ setId, optionId: optionId! })),
-              examScores,  // 🆕 추가
+              examScores,
             },
           },
         }));
@@ -468,7 +495,6 @@ export function useFeedRegular({
       return;
     }
     
-    // 🆕 진도 검사 (출석인 카드만)
     const progressErrorCards = dirtyCards.filter(c => 
       c.attendanceStatus !== 'absent' && !validateProgressBeforeSave(c)
     );
@@ -490,7 +516,6 @@ export function useFeedRegular({
         const ticketId = makeupTicketMap[cardData.studentId];
         const isMakeupSession = !!ticketId;
         
-        // 🆕 시험 점수 추출
         const examScores = Object.entries(cardData.examScores)
           .filter(([_, score]) => score !== null && score !== undefined)
           .map(([setId, score]) => ({ setId, score: score! }));
@@ -508,7 +533,7 @@ export function useFeedRegular({
           sessionType: isMakeupSession ? 'makeup' : 'regular',
           makeupTicketId: ticketId,
           progressText: cardData.attendanceStatus !== 'absent' ? cardData.progressText : undefined,
-          progressEntries: cardData.attendanceStatus !== 'absent' ? cardData.progressEntries : [],  // 🆕 추가
+          progressEntries: cardData.attendanceStatus !== 'absent' ? cardData.progressEntries : [],
           memoValues: cardData.memoValues,
           feedValues: cardData.attendanceStatus !== 'absent'
             ? Object.entries(cardData.feedValues)
@@ -564,15 +589,15 @@ export function useFeedRegular({
     setStudents,
     cardDataMap,
     setCardDataMap,
-    previousProgressEntriesMap,  // 🆕 추가
+    previousProgressEntriesMap,
     
     // 핸들러
     handleAttendanceChange,
     handleNotifyParentChange,
     handleNeedsMakeupChange,
     handleProgressChange,
-    handleProgressEntriesChange,  // 🆕 추가
-    handleApplyProgressToAll,  // 🆕 진도 반 전체 적용
+    handleProgressEntriesChange,
+    handleApplyProgressToAll,
     handleMemoChange,
     handleFeedValueChange,
     handleExamScoreChange,

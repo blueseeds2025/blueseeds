@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import Link from 'next/link';
 import { createBrowserClient } from '@supabase/ssr';
 import { Button } from '@/components/ui/button';
 import { 
@@ -34,14 +35,19 @@ export function DashboardSidebar() {
   const pathname = usePathname();
   const { user } = useAuth();
   
-  const supabase = createBrowserClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  // 🆕 supabase client를 1회만 생성 (렌더마다 새로 만들지 않음)
+  const supabase = useMemo(() => 
+    createBrowserClient<Database>(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    ), 
+  []);
 
+  // 🆕 로그아웃: replace + refresh 사용
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    router.push('/auth/login');
+    router.replace('/auth/login');
+    router.refresh();
   };
 
   const userRole = user?.role || null;
@@ -154,16 +160,16 @@ export function DashboardSidebar() {
         </div>
       </div>
 
-      {/* 메뉴 영역 */}
+      {/* 메뉴 영역 - 🆕 Link 컴포넌트 사용 */}
       <nav className="p-4 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 180px)' }}>
         {menuItems.filter(item => item.show).map((item) => {
           const Icon = item.icon;
           const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
           
           return (
-            <button
+            <Link
               key={item.href}
-              onClick={() => router.push(item.href)}
+              href={item.href}
               className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg mb-1 transition-colors ${
                 isActive 
                   ? 'bg-[#6366F1]/10 text-[#6366F1]' 
@@ -174,7 +180,7 @@ export function DashboardSidebar() {
               <span className={`${!isSidebarOpen && 'hidden'}`}>
                 {item.label}
               </span>
-            </button>
+            </Link>
           );
         })}
       </nav>
