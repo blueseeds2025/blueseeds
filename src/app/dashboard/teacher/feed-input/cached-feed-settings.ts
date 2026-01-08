@@ -1,4 +1,3 @@
-import { unstable_cache } from 'next/cache';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { 
   FeedOptionSet,
@@ -8,7 +7,6 @@ import {
   Textbook,
   ClassInfo,
 } from './types';
-import { CacheTags } from './cache-utils';
 
 // ============================================================================
 // 피드 설정 데이터 타입
@@ -23,7 +21,7 @@ export interface FeedSettingsData {
 }
 
 // ============================================================================
-// 피드 설정 조회 (캐시 없음 - 직접 호출용)
+// 피드 설정 조회
 // ============================================================================
 
 export async function fetchFeedSettings(
@@ -40,6 +38,8 @@ export async function fetchFeedSettings(
     textbooksResult,
     tenantSettingsResult,
     featuresResult,
+    // ✅ teacher인 경우 피드 권한 조회
+    feedPermissionsResult,
   ] = await Promise.all([
     // 1. 반 목록
     (async () => {
@@ -116,6 +116,15 @@ export async function fetchFeedSettings(
       .eq('is_enabled', true)
       .is('deleted_at', null)
       .or('expires_at.is.null,expires_at.gt.now()'),
+    
+    // ✅ 7. 선생님 피드 권한 (teacher인 경우만 사용)
+    role === 'teacher'
+      ? supabase
+          .from('teacher_feed_permissions')
+          .select('option_set_id, is_allowed')
+          .eq('tenant_id', tenantId)
+          .eq('teacher_id', userId)
+      : Promise.resolve({ data: null }),
   ]);
   
   // 반 목록 처리
@@ -125,8 +134,32 @@ export async function fetchFeedSettings(
     color: c.color ?? undefined,
   }));
   
-  // 옵션 세트 처리
-  const setIds = (optionSetsResult.data || []).map(s => s.id);
+  // ✅ teacher 권한 맵 생성
+  let allowedSetIds: Set<string> | null = null;
+  
+  if (role === 'teacher' && feedPermissionsResult.data) {
+    // 권한 설정이 있는 경우: is_allowed=true인 것만 허용
+    const permissions = feedPermissionsResult.data as { option_set_id: string; is_allowed: boolean }[];
+    
+    if (permissions.length > 0) {
+      allowedSetIds = new Set(
+        permissions
+          .filter(p => p.is_allowed === true)
+          .map(p => p.option_set_id)
+      );
+    }
+    // permissions.length === 0이면 권한 설정 없음 → 전체 허용 (allowedSetIds = null)
+  }
+  
+  // 옵션 세트 처리 (✅ teacher 권한 필터링 적용)
+  let filteredOptionSets = optionSetsResult.data || [];
+  
+  if (allowedSetIds !== null) {
+    // 권한 설정이 있는 경우: 허용된 것만 필터링
+    filteredOptionSets = filteredOptionSets.filter(set => allowedSetIds!.has(set.id));
+  }
+  
+  const setIds = filteredOptionSets.map(s => s.id);
   let allOptions: FeedOption[] = [];
   
   if (setIds.length > 0) {
@@ -155,7 +188,7 @@ export async function fetchFeedSettings(
     optionsBySetId[opt.set_id].push(opt);
   }
   
-  const optionSets: FeedOptionSet[] = (optionSetsResult.data || []).map(set => ({
+  const optionSets: FeedOptionSet[] = filteredOptionSets.map(set => ({
     id: set.id,
     name: set.name,
     set_key: set.set_key,
