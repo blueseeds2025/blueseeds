@@ -81,10 +81,34 @@ export async function listTeachers(): Promise<Teacher[]> {
     throw error;
   }
 
-  // calendar_color를 color로 매핑
+  // ✅ 각 선생님별 담당 반 카운트 조회
+  const teacherIds = (data ?? []).map(t => t.id);
+  
+  let classCountMap: Record<string, number> = {};
+  
+  if (teacherIds.length > 0) {
+    const { data: classCounts, error: countErr } = await sb
+      .from('class_teachers')
+      .select('teacher_id')
+      .in('teacher_id', teacherIds)
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true)  // ✅ is_active=true 조건
+      .is('deleted_at', null);
+    
+    if (!countErr && classCounts) {
+      // 선생님별 카운트 집계
+      for (const ct of classCounts) {
+        const tid = ct.teacher_id as string;
+        classCountMap[tid] = (classCountMap[tid] || 0) + 1;
+      }
+    }
+  }
+
+  // calendar_color를 color로 매핑 + classCount 추가
   return (data ?? []).map((t: any) => ({
     ...t,
     color: t.calendar_color || '#6366F1',
+    classCount: classCountMap[t.id] || 0,  // ✅ 담당 반 개수 추가
   })) as Teacher[];
 }
 

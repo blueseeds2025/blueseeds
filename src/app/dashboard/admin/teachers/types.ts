@@ -13,6 +13,7 @@ export type Teacher = {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+  classCount?: number;  // ✅ 담당 반 개수 추가
 };
 
 /** 교사 상세 정보 (담당 반, 기능 권한, 피드 권한 포함) */
@@ -69,4 +70,4 @@ export type ClassInfo = {
 /** Server Action 결과 타입 */
 export type ActionResult<T = void> = 
   | { ok: true; data?: T }
-  | { ok: false; message: string };
+  | { ok: false, message: string };
