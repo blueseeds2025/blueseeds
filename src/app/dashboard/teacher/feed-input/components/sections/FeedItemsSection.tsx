@@ -6,7 +6,7 @@ interface FeedItemsSectionProps {
   studentId: string;
   optionSets: FeedOptionSet[];
   feedValues: Record<string, string | null>;
-  onOpenOptionPicker: (studentId: string, setId: string, anchorEl: HTMLElement) => void;
+  onOpenOptionPicker: (studentId: string, setId: string, anchorEl: HTMLElement, currentValue: string | null) => void;
 }
 
 export default function FeedItemsSection({
@@ -28,7 +28,8 @@ export default function FeedItemsSection({
   return (
     <div className="grid grid-cols-2 gap-2">
       {optionSets.map((set) => {
-        const isEmpty = !feedValues[set.id];
+        const currentValue = feedValues[set.id] || null;
+        const isEmpty = !currentValue;
         return (
           <div key={set.id}>
             <label className="block text-xs font-semibold text-[#6B7280] mb-1">
@@ -38,12 +39,12 @@ export default function FeedItemsSection({
               type="button"
               tabIndex={0}
               onFocus={(e) => {
-                onOpenOptionPicker(studentId, set.id, e.currentTarget);
+                onOpenOptionPicker(studentId, set.id, e.currentTarget, currentValue);
               }}
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                onOpenOptionPicker(studentId, set.id, e.currentTarget);
+                onOpenOptionPicker(studentId, set.id, e.currentTarget, currentValue);
               }}
               className={`
                 w-full px-3 py-2 border rounded-lg text-sm text-left font-medium

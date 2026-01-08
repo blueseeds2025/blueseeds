@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { 
   StudentCardData, 
   FeedOptionSet,
@@ -30,24 +30,25 @@ import {
   ProgressSection,
   FeedItemsSection,
   MemoSection,
-  ExamScoreSection,  // 🆕 추가
+  ExamScoreSection,
 } from './sections';
 
 interface StudentCardProps {
   data: StudentCardData;
   optionSets: FeedOptionSet[];
   examTypes: ExamType[];
-  textbooks: Textbook[];  // 🆕 추가
-  previousProgressEntries: ProgressEntry[];  // 🆕 추가
+  textbooks: Textbook[];
+  previousProgressEntries: ProgressEntry[];
   tenantSettings: TenantSettings;
   memoFields: MemoField[];
-  onOpenOptionPicker: (studentId: string, setId: string, anchorEl: HTMLElement) => void;
+  // ✅ 시그니처 변경: currentValue 추가
+  onOpenOptionPicker: (studentId: string, setId: string, anchorEl: HTMLElement, currentValue: string | null) => void;
   onAttendanceChange: (studentId: string, status: AttendanceStatus, reason?: AbsenceReason, detail?: string) => void;
   onNotifyParentChange: (studentId: string, notify: boolean) => void;
   onNeedsMakeupChange: (studentId: string, needsMakeup: boolean) => void;
   onProgressChange: (studentId: string, progress: string) => void;
-  onProgressEntriesChange: (studentId: string, entries: ProgressEntry[]) => void;  // 🆕 추가
-  onApplyProgressToAll?: (studentId: string, entries: ProgressEntry[]) => void;  // 🆕 진도 반 전체 적용
+  onProgressEntriesChange: (studentId: string, entries: ProgressEntry[]) => void;
+  onApplyProgressToAll?: (studentId: string, entries: ProgressEntry[]) => void;
   onMemoChange: (studentId: string, fieldId: string, value: string) => void;
   onExamScoreChange: (studentId: string, setId: string, score: number | null) => void;
   onSave: (studentId: string) => Promise<void>;
@@ -56,12 +57,12 @@ interface StudentCardProps {
   isSendingNotify?: boolean;
 }
 
-export default function StudentCard({
+function StudentCard({
   data,
   optionSets,
   examTypes,
-  textbooks,  // 🆕 추가
-  previousProgressEntries,  // 🆕 추가
+  textbooks,
+  previousProgressEntries,
   tenantSettings,
   memoFields,
   onOpenOptionPicker,
@@ -69,8 +70,8 @@ export default function StudentCard({
   onNotifyParentChange,
   onNeedsMakeupChange,
   onProgressChange,
-  onProgressEntriesChange,  // 🆕 추가
-  onApplyProgressToAll,  // 🆕 진도 반 전체 적용
+  onProgressEntriesChange,
+  onApplyProgressToAll,
   onMemoChange,
   onExamScoreChange,
   onSave,
@@ -200,7 +201,7 @@ export default function StudentCard({
             />
           )}
           
-          {/* 🆕 시험 점수 - 등원/지각일 때만, 시험 종류가 있을 때만 */}
+          {/* 시험 점수 - 등원/지각일 때만, 시험 종류가 있을 때만 */}
           {tenantSettings.exam_score_enabled && !isAbsent && examTypes && examTypes.length > 0 && (
             <ExamScoreSection
               studentId={data.studentId}
@@ -273,3 +274,6 @@ export default function StudentCard({
     </>
   );
 }
+
+// ✅ memo 적용 - data가 바뀐 카드만 리렌더
+export default memo(StudentCard);

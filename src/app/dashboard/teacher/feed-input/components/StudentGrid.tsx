@@ -29,7 +29,8 @@ interface StudentGridProps {
   memoFields: MemoField[];
   gridClass: string;
   savingStudentId: string | null;
-  onOpenOptionPicker: (studentId: string, setId: string, anchorEl: HTMLElement) => void;
+  // ✅ 시그니처 변경: currentValue 추가
+  onOpenOptionPicker: (studentId: string, setId: string, anchorEl: HTMLElement, currentValue: string | null) => void;
   onAttendanceChange: (studentId: string, status: AttendanceStatus, reason?: AbsenceReason, detail?: string) => void;
   onNotifyParentChange: (studentId: string, notify: boolean) => void;
   onNeedsMakeupChange: (studentId: string, needsMakeup: boolean) => void;
