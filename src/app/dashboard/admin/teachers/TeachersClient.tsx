@@ -25,17 +25,25 @@ export default function TeachersClient() {
     handleUpdateReportPermission,
   } = useTeachers();
 
-  // ============ 담당 반 카운트 (로컬) ============
-  const [classCounts, setClassCounts] = useState<Record<string, number>>({});
+  // ✅ 담당 반 카운트 - 서버 데이터 기반 + 선택 시 업데이트
+  const [localClassCounts, setLocalClassCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     if (selectedTeacher) {
-      setClassCounts((prev) => ({
+      setLocalClassCounts((prev) => ({
         ...prev,
         [selectedTeacher.id]: selectedTeacher.assignedClasses.length,
       }));
     }
   }, [selectedTeacher]);
+
+  // ✅ 카운트 계산 함수: 로컬 업데이트가 있으면 로컬 값, 없으면 서버 값
+  const getClassCount = (teacher: Teacher) => {
+    if (localClassCounts[teacher.id] !== undefined) {
+      return localClassCounts[teacher.id];
+    }
+    return teacher.classCount ?? 0;  // ✅ 서버에서 받은 값 사용
+  };
 
   // ============ Render ============
   return (
@@ -84,7 +92,7 @@ export default function TeachersClient() {
                     key={teacher.id}
                     teacher={teacher}
                     isSelected={selectedTeacher?.id === teacher.id}
-                    assignedClassCount={classCounts[teacher.id] ?? 0}
+                    assignedClassCount={getClassCount(teacher)}
                     onSelect={() => selectTeacher(
                       selectedTeacher?.id === teacher.id ? null : teacher
                     )}
