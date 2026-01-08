@@ -1,10 +1,9 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import { revalidatePath, revalidateTag } from 'next/cache';
+import { revalidatePath } from 'next/cache';
 import { SaveFeedPayload, SaveFeedResponse } from '../types';
 import { handleMakeupTicket, completeMakeupTicket } from './feed-makeup.actions';
-import { CacheTags } from '../cache-utils';
 
 // ============================================================================
 // 단일 학생 피드 저장
@@ -373,24 +372,4 @@ export async function saveAllFeeds(
   return { success: allSuccess, results };
 }
 
-// ============================================================================
-// ✅ 설정 캐시 무효화 (설정 변경 시 호출)
-// ============================================================================
 
-export async function invalidateFeedSettings(): Promise<void> {
-  const supabase = await createClient();
-  
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
-  
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('tenant_id')
-    .eq('id', user.id)
-    .single();
-  
-  if (!profile) return;
-  
-  // tenant 캐시 무효화
-  revalidateTag(CacheTags.feedSettings(profile.tenant_id));
-}

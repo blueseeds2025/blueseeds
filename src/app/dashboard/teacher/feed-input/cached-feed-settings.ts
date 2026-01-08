@@ -1,5 +1,5 @@
 import { unstable_cache } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
+import { SupabaseClient } from '@supabase/supabase-js';
 import { 
   FeedOptionSet,
   FeedOption,
@@ -11,12 +11,10 @@ import {
 import { CacheTags } from './cache-utils';
 
 // ============================================================================
-// 캐시된 피드 설정 조회 (정적 데이터)
-// - optionSets, examTypes, textbooks, tenantSettings, classes
-// - 거의 안 바뀌므로 캐시 적용
+// 피드 설정 데이터 타입
 // ============================================================================
 
-interface FeedSettingsData {
+export interface FeedSettingsData {
   classes: ClassInfo[];
   optionSets: FeedOptionSet[];
   examTypes: ExamType[];
@@ -24,13 +22,16 @@ interface FeedSettingsData {
   tenantSettings: TenantSettings;
 }
 
-async function fetchFeedSettingsInternal(
+// ============================================================================
+// 피드 설정 조회 (캐시 없음 - 직접 호출용)
+// ============================================================================
+
+export async function fetchFeedSettings(
+  supabase: SupabaseClient,
   tenantId: string,
   userId: string,
   role: 'owner' | 'teacher'
 ): Promise<FeedSettingsData> {
-  const supabase = await createClient();
-  
   // 병렬 조회
   const [
     classesResult,
@@ -221,23 +222,4 @@ async function fetchFeedSettingsInternal(
     textbooks,
     tenantSettings,
   };
-}
-
-// ============================================================================
-// 캐시된 함수 (tenant별 1시간 캐시)
-// ============================================================================
-
-export function getCachedFeedSettings(
-  tenantId: string,
-  userId: string,
-  role: 'owner' | 'teacher'
-) {
-  return unstable_cache(
-    () => fetchFeedSettingsInternal(tenantId, userId, role),
-    [`feed-settings`, tenantId, userId, role],
-    {
-      tags: [CacheTags.feedSettings(tenantId)],
-      revalidate: 3600, // 1시간
-    }
-  )();
 }

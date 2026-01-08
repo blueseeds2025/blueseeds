@@ -1,11 +1,11 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import FeedInputClient from './FeedInputClient';
-import { getCachedFeedSettings } from './cached-feed-settings';
+import { fetchFeedSettings } from './cached-feed-settings';
 import { getFeedPageData } from './actions/feed-query.actions';
 
 // ============================================================================
-// Server Component - 캐시된 설정 + 동적 데이터 조회
+// Server Component - 설정 + 동적 데이터 조회
 // ============================================================================
 
 export default async function FeedInputPage() {
@@ -32,15 +32,15 @@ export default async function FeedInputPage() {
   const role = profile.role as 'owner' | 'teacher';
   const tenantId = profile.tenant_id;
   
-  // 3. ✅ 캐시된 정적 데이터 조회 (1시간 캐시)
-  const settings = await getCachedFeedSettings(tenantId, user.id, role);
+  // 3. 정적 데이터 조회 (supabase client 전달)
+  const settings = await fetchFeedSettings(supabase, tenantId, user.id, role);
   
   // 4. 초기 반/날짜 결정
   const today = new Date().toISOString().split('T')[0];
   const initialClassId = settings.classes[0]?.id || '';
   const initialDate = today;
   
-  // 5. 동적 데이터 조회 (캐시 없음, 매번 fresh)
+  // 5. 동적 데이터 조회
   let initialFeedData = {
     students: [] as Awaited<ReturnType<typeof getFeedPageData>>['data'] extends infer T ? T extends { students: infer S } ? S : never : never,
     savedFeeds: {} as Record<string, unknown>,
@@ -65,13 +65,13 @@ export default async function FeedInputPage() {
   return (
     <div>
       <FeedInputClient 
-        // 정적 데이터 (캐시됨)
+        // 정적 데이터
         initialClasses={settings.classes}
         initialOptionSets={settings.optionSets}
         initialExamTypes={settings.examTypes}
         initialTextbooks={settings.textbooks}
         initialTenantSettings={settings.tenantSettings}
-        // 동적 데이터 (fresh)
+        // 동적 데이터
         initialClassId={initialClassId}
         initialDate={initialDate}
         initialStudents={initialFeedData.students}
