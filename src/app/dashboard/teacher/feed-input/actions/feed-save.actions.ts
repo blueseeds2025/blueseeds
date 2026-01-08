@@ -1,9 +1,10 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, revalidateTag } from 'next/cache';
 import { SaveFeedPayload, SaveFeedResponse } from '../types';
 import { handleMakeupTicket, completeMakeupTicket } from './feed-makeup.actions';
+import { CacheTags } from '../cache-utils';
 
 // ============================================================================
 // 단일 학생 피드 저장
@@ -28,11 +29,13 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
       return { success: false, error: '프로필을 찾을 수 없습니다' };
     }
     
+    const tenantId = profile.tenant_id;
+    
     // 테넌트 기능 확인
     const { data: featureRows } = await supabase
       .from('tenant_features')
       .select('feature_key')
-      .eq('tenant_id', profile.tenant_id)
+      .eq('tenant_id', tenantId)
       .eq('is_enabled', true)
       .is('deleted_at', null)
       .or('expires_at.is.null,expires_at.gt.now()');
@@ -46,7 +49,7 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
     const { data: existingKey } = await supabase
       .from('idempotency_keys')
       .select('id, response_body')
-      .eq('tenant_id', profile.tenant_id)
+      .eq('tenant_id', tenantId)
       .eq('key', payload.idempotencyKey)
       .gt('expires_at', new Date().toISOString())
       .single();
@@ -67,7 +70,7 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
       const { data: existingFeed } = await supabase
         .from('student_feeds')
         .select('id')
-        .eq('tenant_id', profile.tenant_id)
+        .eq('tenant_id', tenantId)
         .eq('class_id', payload.classId)
         .eq('student_id', payload.studentId)
         .eq('feed_date', payload.feedDate)
@@ -102,7 +105,7 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
         if (hasMakeupSystem) {
           await handleMakeupTicket(supabase, {
             feedId,
-            tenantId: profile.tenant_id,
+            tenantId,
             studentId: payload.studentId,
             classId: payload.classId,
             feedDate: payload.feedDate,
@@ -117,7 +120,7 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
         const { data: newFeed, error: insertError } = await supabase
           .from('student_feeds')
           .insert({
-            tenant_id: profile.tenant_id,
+            tenant_id: tenantId,
             class_id: payload.classId,
             student_id: payload.studentId,
             feed_date: payload.feedDate,
@@ -141,7 +144,7 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
         if (hasMakeupSystem) {
           await handleMakeupTicket(supabase, {
             feedId,
-            tenantId: profile.tenant_id,
+            tenantId,
             studentId: payload.studentId,
             classId: payload.classId,
             feedDate: payload.feedDate,
@@ -206,7 +209,7 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
         const { data: newFeed, error: insertError } = await supabase
           .from('student_feeds')
           .insert({
-            tenant_id: profile.tenant_id,
+            tenant_id: tenantId,
             class_id: payload.classId,
             student_id: payload.studentId,
             feed_date: payload.feedDate,
@@ -260,13 +263,13 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
         }
       }
       
-      // 🆕 시험 점수 (option_id는 null, score만 저장)
+      // 시험 점수 (option_id는 null, score만 저장)
       if (payload.examScores && payload.examScores.length > 0) {
         for (const exam of payload.examScores) {
           valueInserts.push({
             feed_id: feedId,
             set_id: exam.setId,
-            option_id: null,  // 시험은 option 선택이 없음
+            option_id: null,
             score: exam.score,
           });
         }
@@ -290,7 +293,7 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
     await supabase
       .from('idempotency_keys')
       .insert({
-        tenant_id: profile.tenant_id,
+        tenant_id: tenantId,
         key: payload.idempotencyKey,
         request_path: '/feed/save',
         response_status: 200,
@@ -298,20 +301,20 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
       });
     
     // ========================================
-    // 🆕 진도 저장 (feed_progress_entries)
+    // 진도 저장 (feed_progress_entries)
     // ========================================
     if (payload.progressEntries && payload.progressEntries.length > 0 && payload.attendanceStatus !== 'absent') {
       // 기존 진도 삭제 (soft delete)
       await supabase
         .from('feed_progress_entries')
         .update({ deleted_at: new Date().toISOString() })
-        .eq('tenant_id', profile.tenant_id)
+        .eq('tenant_id', tenantId)
         .eq('student_id', payload.studentId)
         .eq('feed_date', payload.feedDate);
       
       // 새 진도 저장
       const progressInserts = payload.progressEntries.map(entry => ({
-        tenant_id: profile.tenant_id,
+        tenant_id: tenantId,
         student_id: payload.studentId,
         feed_date: payload.feedDate,
         textbook_id: entry.textbookId,
@@ -326,10 +329,15 @@ export async function saveFeed(payload: SaveFeedPayload): Promise<SaveFeedRespon
       
       if (progressError) {
         console.error('feed_progress_entries insert error:', progressError);
-        // 진도 저장 실패는 전체 실패로 처리하지 않음 (피드는 저장됨)
       }
     }
     
+    // ========================================
+    // ✅ 캐시 무효화
+    // ========================================
+    
+    // 피드 데이터는 캐시하지 않으므로 revalidatePath만 사용
+    // 설정이 바뀌면 revalidateTag 사용 (아래 invalidateFeedSettings 함수)
     revalidatePath('/dashboard/teacher/feed-input');
     
     return response;
@@ -363,4 +371,26 @@ export async function saveAllFeeds(
   const allSuccess = results.every(r => r.success);
   
   return { success: allSuccess, results };
+}
+
+// ============================================================================
+// ✅ 설정 캐시 무효화 (설정 변경 시 호출)
+// ============================================================================
+
+export async function invalidateFeedSettings(): Promise<void> {
+  const supabase = await createClient();
+  
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+  
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('tenant_id')
+    .eq('id', user.id)
+    .single();
+  
+  if (!profile) return;
+  
+  // tenant 캐시 무효화
+  revalidateTag(CacheTags.feedSettings(profile.tenant_id));
 }

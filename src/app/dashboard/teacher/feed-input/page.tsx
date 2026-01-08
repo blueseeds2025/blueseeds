@@ -1,10 +1,11 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import FeedInputClient from './FeedInputClient';
-import { getFeedPageSettings, getFeedPageData } from './actions/feed-query.actions';
+import { getCachedFeedSettings } from './cached-feed-settings';
+import { getFeedPageData } from './actions/feed-query.actions';
 
 // ============================================================================
-// Server Component - 서버에서 모든 초기 데이터 조회
+// Server Component - 캐시된 설정 + 동적 데이터 조회
 // ============================================================================
 
 export default async function FeedInputPage() {
@@ -18,52 +19,28 @@ export default async function FeedInputPage() {
   }
   
   // 2. 프로필 확인
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('id, role, tenant_id')
     .eq('id', user.id)
     .single();
   
-  if (!profile || !['owner', 'teacher'].includes(profile.role)) {
+  if (profileError || !profile || !['owner', 'teacher'].includes(profile.role)) {
     redirect('/dashboard');
   }
   
-  // 3. 정적 데이터 조회 (병렬)
-  const settingsResult = await getFeedPageSettings();
+  const role = profile.role as 'owner' | 'teacher';
+  const tenantId = profile.tenant_id;
   
-  if (!settingsResult.success || !settingsResult.data) {
-    // 설정 로드 실패 시 기본값으로 진행
-    console.error('getFeedPageSettings failed:', settingsResult.error);
-  }
-  
-  const settings = settingsResult.data || {
-    classes: [],
-    optionSets: [],
-    examTypes: [],
-    textbooks: [],
-    tenantSettings: {
-      progress_enabled: false,
-      materials_enabled: false,
-      exam_score_enabled: false,
-      makeup_defaults: {
-        '병결': true,
-        '학교행사': true,
-        '가사': false,
-        '무단': false,
-        '기타': true,
-      },
-      plan: 'basic' as const,
-      features: [],
-      operation_mode: 'solo' as const,
-    },
-  };
+  // 3. ✅ 캐시된 정적 데이터 조회 (1시간 캐시)
+  const settings = await getCachedFeedSettings(tenantId, user.id, role);
   
   // 4. 초기 반/날짜 결정
   const today = new Date().toISOString().split('T')[0];
   const initialClassId = settings.classes[0]?.id || '';
   const initialDate = today;
   
-  // 5. 초기 동적 데이터 조회 (첫 번째 반, 오늘 날짜)
+  // 5. 동적 데이터 조회 (캐시 없음, 매번 fresh)
   let initialFeedData = {
     students: [] as Awaited<ReturnType<typeof getFeedPageData>>['data'] extends infer T ? T extends { students: infer S } ? S : never : never,
     savedFeeds: {} as Record<string, unknown>,
@@ -88,13 +65,13 @@ export default async function FeedInputPage() {
   return (
     <div>
       <FeedInputClient 
-        // 정적 데이터 (변하지 않음)
+        // 정적 데이터 (캐시됨)
         initialClasses={settings.classes}
         initialOptionSets={settings.optionSets}
         initialExamTypes={settings.examTypes}
         initialTextbooks={settings.textbooks}
         initialTenantSettings={settings.tenantSettings}
-        // 동적 데이터 (초기값)
+        // 동적 데이터 (fresh)
         initialClassId={initialClassId}
         initialDate={initialDate}
         initialStudents={initialFeedData.students}
@@ -103,7 +80,7 @@ export default async function FeedInputPage() {
         initialPreviousProgressEntriesMap={initialFeedData.previousProgressEntriesMap}
         // 사용자 정보
         teacherId={user.id}
-        tenantId={profile.tenant_id}
+        tenantId={tenantId}
       />
     </div>
   );
